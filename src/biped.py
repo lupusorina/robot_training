@@ -1,18 +1,7 @@
-# Copyright 2025 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""Joystick task for Berkeley Humanoid."""
+"""
+  Joystick task for Berkeley Humanoid.
+  Modified by Sorina Lupu (eslupu@caltech.edu)
+"""
 
 from typing import Any, Dict, Optional, Union
 
@@ -95,7 +84,7 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-XML_PATH = '/home/sorinal/biped_mujoco/lightweight_biped_training/assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
+XML_PATH = '../assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
 ROOT_BODY = "torso"
 FEET_SITES = ["l_foot", "r_foot"]
 LEFT_FEET_GEOMS = ["l_foot1"]
@@ -113,7 +102,6 @@ class Biped():
 
   def __init__(
       self,
-      task: str = "flat_terrain", # TODO: remove
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
@@ -121,7 +109,7 @@ class Biped():
     if config_overrides:
       self._config.update_from_flattened_dict(config_overrides)
 
-    self._ctrl_dt = config.ctrl_dt
+    self.ctrl_dt = config.ctrl_dt
     self._sim_dt = config.sim_dt
     
     self._mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
@@ -130,55 +118,53 @@ class Biped():
 
     self._mj_model.vis.global_.offwidth = 3840
     self._mj_model.vis.global_.offheight = 2160
+    
+    self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
+    print(f"Number of joints: {self._nb_joints}")
 
-    self._mjx_model = mjx.put_model(self._mj_model)
-    self._xml_path = XML_PATH
+    self._mjx_model = mjx.put_model(self._mj_model) # MJX model.
     
     self._post_init()
 
   def _post_init(self) -> None:
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
-    self._default_pose = jp.array(self._mj_model.keyframe("home").qpos[7:])
+    self._default_q_joints = jp.array(self._mj_model.keyframe("home").qpos[7:])
 
-    # Note: First joint is freejoint.
-    self._lowers, self._uppers = self._mj_model.jnt_range[1:].T
-    c = (self._lowers + self._uppers) / 2
-    r = self._uppers - self._lowers
-    self._soft_lowers = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
-    self._soft_uppers = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
+    q_j_min, q_j_max = self._mj_model.jnt_range[1:].T # Note: First joint is freejoint.
+    c = (q_j_min + q_j_max) / 2
+    r = q_j_max - q_j_min
+    self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
+    self._soft_q_j_max = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
 
+    # Indices joints.
     hip_indices = []
     hip_joint_names = ["HR", "HAA"]
     for side in ["LL", "LR"]:
       for joint_name in hip_joint_names:
-        hip_indices.append(
-            self._mj_model.joint(f"{side}_{joint_name}").qposadr - 7
-        )
-    self._hip_indices = jp.array(hip_indices)
+        hip_indices.append(self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7)
+    self._hip_indices = jp.array(hip_indices) # For hip reward deviation.
 
     knee_indices = []
     for side in ["LL", "LR"]:
-      knee_indices.append(self._mj_model.joint(f"{side}_KFE").qposadr - 7)
-    self._knee_indices = jp.array(knee_indices)
+      knee_indices.append(self._mj_model.joint(f"{side}_KFE").qposadr[0] - 7)
+    self._knee_indices = jp.array(knee_indices) # For knee reward deviation.
+    
+    ffe_indices = []
+    for side in ["LL", "LR"]:
+      ffe_indices.append(self._mj_model.joint(f"{side}_FFE").qposadr[0] - 7)
+    self._ffe_indices = jp.array(ffe_indices) # For ffe reward deviation.
+    
+    faa_indices = []
+    for side in ["LL", "LR"]:
+      faa_indices.append(self._mj_model.joint(f"{side}_FAA").qposadr[0] - 7)
+    self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
 
-    # fmt: off
-    self._weights = jp.array([
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
-    ])
-    # fmt: on
+    self._imu_site_id = self._mj_model.site("imu").id
 
     self._torso_body_id = self._mj_model.body(ROOT_BODY).id
-    self._torso_mass = self._mj_model.body_subtreemass[self._torso_body_id]
-    self._site_id = self._mj_model.site("imu").id
-
-    self._feet_site_id = np.array(
-        [self._mj_model.site(name).id for name in FEET_SITES]
-    )
+    self._feet_site_id = np.array([self._mj_model.site(name).id for name in FEET_SITES])
     self._floor_geom_id = self._mj_model.geom("floor").id
-    self._feet_geom_id = np.array(
-        [self._mj_model.geom(name).id for name in FEET_GEOMS]
-    )
+    self._feet_geom_id = np.array([self._mj_model.geom(name).id for name in FEET_GEOMS])
 
     foot_linvel_sensor_adr = []
     for site in FEET_SITES:
@@ -190,16 +176,13 @@ class Biped():
       )
     self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
 
-    qpos_noise_scale = np.zeros(12)
-    hip_ids = [0, 1, 2, 6, 7, 8]
-    kfe_ids = [3, 9]
-    ffe_ids = [4, 10]
-    faa_ids = [5, 11]
-    qpos_noise_scale[hip_ids] = self._config.noise_config.scales.hip_pos
-    qpos_noise_scale[kfe_ids] = self._config.noise_config.scales.kfe_pos
-    qpos_noise_scale[ffe_ids] = self._config.noise_config.scales.ffe_pos
-    qpos_noise_scale[faa_ids] = self._config.noise_config.scales.faa_pos
-    self._qpos_noise_scale = jp.array(qpos_noise_scale)
+    q_j_noise_scale = np.zeros(self._nb_joints)
+    hip_ids = [0, 1, 2, 6, 7, 8] # TODO fix this hardcoded thing
+    q_j_noise_scale[hip_ids] = self._config.noise_config.scales.hip_pos
+    q_j_noise_scale[self._knee_indices] = self._config.noise_config.scales.kfe_pos
+    q_j_noise_scale[self._ffe_indices] = self._config.noise_config.scales.ffe_pos
+    q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
+    self._q_j_noise_scale = jp.array(q_j_noise_scale)
 
   def reset(self, rng: jax.Array) -> utils.State:
     qpos = self._init_q
@@ -217,22 +200,26 @@ class Biped():
 
     # qpos[7:]=*U(0.5, 1.5)
     rng, key = jax.random.split(rng)
-    qpos = qpos.at[7:].set(
-        qpos[7:] * jax.random.uniform(key, (12,), minval=0.5, maxval=1.5)
-    )
+    qpos = qpos.at[7:].set(qpos[7:] * jax.random.uniform(key, (self._nb_joints,), minval=0.5, maxval=1.5))
 
     # d(xyzrpy)=U(-0.5, 0.5)
     rng, key = jax.random.split(rng)
-    qvel = qvel.at[0:6].set(
-        jax.random.uniform(key, (6,), minval=-0.5, maxval=0.5)
-    )
+    qvel = qvel.at[0:6].set(jax.random.uniform(key, (6,), minval=-0.5, maxval=0.5))
 
-    data = utils.init(self._mjx_model, qpos=qpos, qvel=qvel, ctrl=qpos[7:])
+    # Initialize data.
+    data = mjx.make_data(self._mjx_model)
+    if qpos is not None:
+      data = data.replace(qpos=qpos)
+    if qvel is not None:
+      data = data.replace(qvel=qvel)
+    if qpos[7:] is not None:
+      data = data.replace(ctrl=qpos[7:])
+    data = mjx.forward(self._mjx_model, data)
 
     # Phase, freq=U(1.0, 1.5)
     rng, key = jax.random.split(rng)
     gait_freq = jax.random.uniform(key, (1,), minval=1.25, maxval=1.5)
-    phase_dt = 2 * jp.pi * self._ctrl_dt * gait_freq
+    phase_dt = 2 * jp.pi * self.ctrl_dt * gait_freq
     phase = jp.array([0, jp.pi])
 
     rng, cmd_rng = jax.random.split(rng)
@@ -245,7 +232,7 @@ class Biped():
         minval=self._config.push_config.interval_range[0],
         maxval=self._config.push_config.interval_range[1],
     )
-    push_interval_steps = jp.round(push_interval / self._ctrl_dt).astype(jp.int32)
+    push_interval_steps = jp.round(push_interval / self.ctrl_dt).astype(jp.int32)
 
     info = {
         "rng": rng,
@@ -270,7 +257,6 @@ class Biped():
     for k in self._config.reward_config.scales.keys():
       metrics[f"reward/{k}"] = jp.zeros(())
     metrics["swing_peak"] = jp.zeros(())
-
     contact = jp.array([
         geoms_colliding(data, geom_id, self._floor_geom_id)
         for geom_id in self._feet_geom_id
@@ -278,16 +264,10 @@ class Biped():
     obs = self._get_obs(data, info, contact)
     reward, done = jp.zeros(2)
     return utils.State(data, obs, reward, done, metrics, info)
-  
-  @property
-  def n_substeps(self) -> int:
-    """Number of sim steps per control step."""
-    return int(round(self._ctrl_dt / self._sim_dt))
 
   def step(self, state: utils.State, action: jax.Array) -> utils.State:
-    state.info["rng"], push1_rng, push2_rng = jax.random.split(
-        state.info["rng"], 3
-    )
+    state.info["rng"], push1_rng, push2_rng = jax.random.split(state.info["rng"], 3)
+
     push_theta = jax.random.uniform(push1_rng, maxval=2 * jp.pi)
     push_magnitude = jax.random.uniform(
         push2_rng,
@@ -305,10 +285,8 @@ class Biped():
     data = state.data.replace(qvel=qvel)
     state = state.replace(data=data)
 
-    motor_targets = self._default_pose + action * self._config.action_scale
-    data = utils.step(
-        self._mjx_model, state.data, motor_targets, self.n_substeps
-    )
+    motor_targets = self._default_q_joints + action * self._config.action_scale
+    data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
     state.info["motor_targets"] = motor_targets
 
     contact = jp.array([
@@ -317,7 +295,7 @@ class Biped():
     ])
     contact_filt = contact | state.info["last_contact"]
     first_contact = (state.info["feet_air_time"] > 0.0) * contact_filt
-    state.info["feet_air_time"] += self._ctrl_dt
+    state.info["feet_air_time"] += self.ctrl_dt
     p_f = data.site_xpos[self._feet_site_id]
     p_fz = p_f[..., -1]
     state.info["swing_peak"] = jp.maximum(state.info["swing_peak"], p_fz)
@@ -331,7 +309,7 @@ class Biped():
     rewards = {
         k: v * self._config.reward_config.scales[k] for k, v in rewards.items()
     }
-    reward = jp.clip(sum(rewards.values()) * self._ctrl_dt, 0.0, 10000.0)
+    reward = jp.clip(sum(rewards.values()) * self.ctrl_dt, 0.0, 10000.0)
 
     state.info["push"] = push
     state.info["step"] += 1
@@ -376,6 +354,10 @@ class Biped():
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
       return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
 
+  @property
+  def n_substeps(self) -> int:
+    """Number of sim steps per control step."""
+    return int(round(self.ctrl_dt / self._sim_dt))
 
   def _get_obs(
       self, data: mjx.Data, info: dict[str, Any], contact: jax.Array
@@ -389,7 +371,7 @@ class Biped():
         * self._config.noise_config.scales.gyro
     )
 
-    gravity = data.site_xmat[self._site_id].T @ jp.array([0, 0, -1])
+    gravity = data.site_xmat[self._imu_site_id].T @ jp.array([0, 0, -1])
     info["rng"], noise_rng = jax.random.split(info["rng"])
     noisy_gravity = (
         gravity
@@ -404,7 +386,7 @@ class Biped():
         joint_angles
         + (2 * jax.random.uniform(noise_rng, shape=joint_angles.shape) - 1)
         * self._config.noise_config.level
-        * self._qpos_noise_scale
+        * self._q_j_noise_scale
     )
 
     joint_vel = data.qvel[6:]
@@ -429,12 +411,12 @@ class Biped():
         * self._config.noise_config.scales.linvel
     )
 
-    state = jp.hstack([
+    self._state = jp.hstack([
         noisy_linvel,  # 3
         noisy_gyro,  # 3
         noisy_gravity,  # 3
         info["command"],  # 3
-        noisy_joint_angles - self._default_pose,  # 12
+        noisy_joint_angles - self._default_q_joints,  # 12
         noisy_joint_vel,  # 12
         info["last_act"],  # 12
         phase,
@@ -445,14 +427,14 @@ class Biped():
     feet_vel = data.sensordata[self._foot_linvel_sensor_adr].ravel()
     root_height = data.qpos[2]
 
-    privileged_state = jp.hstack([
-        state,
+    self._privileged_state = jp.hstack([
+        self._state,
         gyro,  # 3
         accelerometer,  # 3
         gravity,  # 3
         linvel,  # 3
         global_angvel,  # 3
-        joint_angles - self._default_pose,
+        joint_angles - self._default_q_joints,
         joint_vel,
         root_height,  # 1
         data.actuator_force,  # 12
@@ -462,8 +444,8 @@ class Biped():
     ])
 
     return {
-        "state": state,
-        "privileged_state": privileged_state,
+        "state": self._state,
+        "privileged_state": self._privileged_state,
     }
 
   def _get_reward(
@@ -521,29 +503,20 @@ class Biped():
         ),
         "joint_deviation_knee": self._cost_joint_deviation_knee(data.qpos[7:]),
         "dof_pos_limits": self._cost_joint_pos_limits(data.qpos[7:]),
-        "pose": self._cost_pose(data.qpos[7:]),
+        "pose": self._cost_joint_angles(data.qpos[7:]),
     }
 
   # Tracking rewards.
 
-  def _reward_tracking_lin_vel(
-      self,
-      commands: jax.Array,
-      local_vel: jax.Array,
-  ) -> jax.Array:
+  def _reward_tracking_lin_vel(self, commands: jax.Array, local_vel: jax.Array, ) -> jax.Array:
     lin_vel_error = jp.sum(jp.square(commands[:2] - local_vel[:2]))
     return jp.exp(-lin_vel_error / self._config.reward_config.tracking_sigma)
 
-  def _reward_tracking_ang_vel(
-      self,
-      commands: jax.Array,
-      ang_vel: jax.Array,
-  ) -> jax.Array:
+  def _reward_tracking_ang_vel(self, commands: jax.Array, ang_vel: jax.Array, ) -> jax.Array:
     ang_vel_error = jp.square(commands[2] - ang_vel[2])
     return jp.exp(-ang_vel_error / self._config.reward_config.tracking_sigma)
 
   # Base-related rewards.
-
   def _cost_lin_vel_z(self, global_linvel) -> jax.Array:
     return jp.square(global_linvel[2])
 
@@ -554,41 +527,30 @@ class Biped():
     return jp.sum(jp.square(torso_zaxis[:2]))
 
   def _cost_base_height(self, base_height: jax.Array) -> jax.Array:
-    return jp.square(
-        base_height - self._config.reward_config.base_height_target
-    )
+    return jp.square(base_height - self._config.reward_config.base_height_target)
 
   # Energy related rewards.
 
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sum(jp.abs(torques))
 
-  def _cost_energy(
-      self, qvel: jax.Array, qfrc_actuator: jax.Array
-  ) -> jax.Array:
+  def _cost_energy(self, qvel: jax.Array, qfrc_actuator: jax.Array) -> jax.Array:
     return jp.sum(jp.abs(qvel) * jp.abs(qfrc_actuator))
 
-  def _cost_action_rate(
-      self, act: jax.Array, last_act: jax.Array, last_last_act: jax.Array
-  ) -> jax.Array:
+  def _cost_action_rate(self, act: jax.Array, last_act: jax.Array, last_last_act: jax.Array) -> jax.Array:
     del last_last_act  # Unused.
     c1 = jp.sum(jp.square(act - last_act))
     return c1
 
   # Other rewards.
-
   def _cost_joint_pos_limits(self, qpos: jax.Array) -> jax.Array:
-    out_of_limits = -jp.clip(qpos - self._soft_lowers, None, 0.0)
-    out_of_limits += jp.clip(qpos - self._soft_uppers, 0.0, None)
+    out_of_limits = -jp.clip(qpos - self._soft_q_j_min, None, 0.0)
+    out_of_limits += jp.clip(qpos - self._soft_q_j_max, 0.0, None)
     return jp.sum(out_of_limits)
 
-  def _cost_stand_still(
-      self,
-      commands: jax.Array,
-      qpos: jax.Array,
-  ) -> jax.Array:
+  def _cost_stand_still(self, commands: jax.Array, qpos: jax.Array, ) -> jax.Array:
     cmd_norm = jp.linalg.norm(commands)
-    return jp.sum(jp.abs(qpos - self._default_pose)) * (cmd_norm < 0.1)
+    return jp.sum(jp.abs(qpos - self._default_q_joints)) * (cmd_norm < 0.1)
 
   def _cost_termination(self, done: jax.Array) -> jax.Array:
     return done
@@ -597,40 +559,30 @@ class Biped():
     return jp.array(1.0)
 
   # Pose-related rewards.
-
-  def _cost_joint_deviation_hip(
-      self, qpos: jax.Array, cmd: jax.Array
-  ) -> jax.Array:
-    cost = jp.sum(
-        jp.abs(qpos[self._hip_indices] - self._default_pose[self._hip_indices])
-    )
+  def _cost_joint_deviation_hip(self, qpos: jax.Array, cmd: jax.Array) -> jax.Array:
+    cost = jp.sum(jp.abs(qpos[self._hip_indices] - self._default_q_joints[self._hip_indices]))
     cost *= jp.abs(cmd[1]) > 0.1
     return cost
 
   def _cost_joint_deviation_knee(self, qpos: jax.Array) -> jax.Array:
-    return jp.sum(
-        jp.abs(
-            qpos[self._knee_indices] - self._default_pose[self._knee_indices]
-        )
-    )
+    return jp.sum(jp.abs(qpos[self._knee_indices] - self._default_q_joints[self._knee_indices]))
 
-  def _cost_pose(self, qpos: jax.Array) -> jax.Array:
-    return jp.sum(jp.square(qpos - self._default_pose) * self._weights)
+  def _cost_joint_angles(self, q_joints: jax.Array) -> jax.Array:
+    weights = jp.array([
+        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
+        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
+    ])
+    return jp.sum(jp.square(q_joints - self._default_q_joints) * weights)
 
   # Feet related rewards.
-
-  def _cost_feet_slip(
-      self, data: mjx.Data, contact: jax.Array, info: dict[str, Any]
-  ) -> jax.Array:
+  def _cost_feet_slip(self, data: mjx.Data, contact: jax.Array, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
     lin_vel = self.get_sensor_data(data, LOCAL_LINVEL_SENSOR)
     body_vel = lin_vel[:2]
     reward = jp.sum(jp.linalg.norm(body_vel, axis=-1) * contact)
     return reward
 
-  def _cost_feet_clearance(
-      self, data: mjx.Data, info: dict[str, Any]
-  ) -> jax.Array:
+  def _cost_feet_clearance(self, data: mjx.Data, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
     feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
     vel_xy = feet_vel[..., :2]
@@ -706,14 +658,13 @@ class Biped():
         jp.hstack([lin_vel_x, lin_vel_y, ang_vel_yaw]),
     )
 
-  # TODO: fix these functions.
   @property
   def observation_size(self) -> utils.ObservationSize:
     return {
-        "state": (52,),
-        "privileged_state": (114,),
+        "state": (self._state.size,),
+        "privileged_state": (self._privileged_state.size,),
     }
 
   @property
   def action_size(self) -> int:
-    return 12
+    return self._nb_joints
