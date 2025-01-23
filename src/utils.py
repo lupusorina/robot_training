@@ -132,33 +132,6 @@ def _tree_replace(
       **{attr[0]: _tree_replace(getattr(base, attr[0]), attr[1:], val)}
   )
 
-def init(
-    model: mjx.Model,
-    qpos: Optional[jax.Array] = None,
-    qvel: Optional[jax.Array] = None,
-    ctrl: Optional[jax.Array] = None,
-    act: Optional[jax.Array] = None,
-    mocap_pos: Optional[jax.Array] = None,
-    mocap_quat: Optional[jax.Array] = None,
-) -> mjx.Data:
-  """Initialize MJX Data."""
-  data = mjx.make_data(model)
-  if qpos is not None:
-    data = data.replace(qpos=qpos)
-  if qvel is not None:
-    data = data.replace(qvel=qvel)
-  if ctrl is not None:
-    data = data.replace(ctrl=ctrl)
-  if act is not None:
-    data = data.replace(act=act)
-  if mocap_pos is not None:
-    data = data.replace(mocap_pos=mocap_pos.reshape(1, -1))
-  if mocap_quat is not None:
-    data = data.replace(mocap_quat=mocap_quat.reshape(1, -1))
-  data = mjx.forward(model, data)
-  return data
-
-
 def step(
     model: mjx.Model,
     data: mjx.Data,
