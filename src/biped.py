@@ -3,7 +3,7 @@
   Modified by Sorina Lupu (eslupu@caltech.edu)
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jp
@@ -16,6 +16,7 @@ import numpy as np
 
 import utils
 from utils import geoms_colliding
+import tqdm
 
 
 def default_config() -> config_dict.ConfigDict:
@@ -96,6 +97,7 @@ GLOBAL_ANGVEL_SENSOR = "global_angvel"
 LOCAL_LINVEL_SENSOR = "local_linvel"
 ACCELEROMETER_SENSOR = "accelerometer"
 GYRO_SENSOR = "gyro"
+IMU_SITE = "imu"
 
 class Biped():
   """Track a joystick command."""
@@ -159,7 +161,7 @@ class Biped():
       faa_indices.append(self._mj_model.joint(f"{side}_FAA").qposadr[0] - 7)
     self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
 
-    self._imu_site_id = self._mj_model.site("imu").id
+    self._imu_site_id = self._mj_model.site(IMU_SITE).id
 
     self._torso_body_id = self._mj_model.body(ROOT_BODY).id
     self._feet_site_id = np.array([self._mj_model.site(name).id for name in FEET_SITES])
@@ -661,10 +663,77 @@ class Biped():
   @property
   def observation_size(self) -> utils.ObservationSize:
     return {
-        "state": (self._state.size,),
+        "state": (self._state.size, ),
         "privileged_state": (self._privileged_state.size,),
     }
 
   @property
   def action_size(self) -> int:
     return self._nb_joints
+  
+  def render(
+      self,
+      trajectory: List[utils.State],
+      height: int = 240,
+      width: int = 320,
+      camera: Optional[str] = None,
+      scene_option: Optional[mujoco.MjvOption] = None,
+      modify_scene_fns: Optional[
+          Sequence[Callable[[mujoco.MjvScene], None]]
+      ] = None,
+  ) -> Sequence[np.ndarray]:
+    return render_array(
+        self._mj_model,
+        trajectory,
+        height,
+        width,
+        camera,
+        scene_option=scene_option,
+        modify_scene_fns=modify_scene_fns,
+    )
+
+
+def render_array(
+    mj_model: mujoco.MjModel,
+    trajectory: Union[List[utils.State], utils.State],
+    height: int = 480,
+    width: int = 640,
+    camera: Optional[str] = None,
+    scene_option: Optional[mujoco.MjvOption] = None,
+    modify_scene_fns: Optional[
+        Sequence[Callable[[mujoco.MjvScene], None]]
+    ] = None,
+    hfield_data: Optional[jax.Array] = None,
+):
+  """Renders a trajectory as an array of images."""
+  renderer = mujoco.Renderer(mj_model, height=height, width=width)
+  camera = camera or -1
+
+  if hfield_data is not None:
+    mj_model.hfield_data = hfield_data.reshape(mj_model.hfield_data.shape)
+    mujoco.mjr_uploadHField(mj_model, renderer._mjr_context, 0)
+
+  def get_image(state, modify_scn_fn=None) -> np.ndarray:
+    d = mujoco.MjData(mj_model)
+    d.qpos, d.qvel = state.data.qpos, state.data.qvel
+    d.mocap_pos, d.mocap_quat = state.data.mocap_pos, state.data.mocap_quat
+    d.xfrc_applied = state.data.xfrc_applied
+    mujoco.mj_forward(mj_model, d)
+    renderer.update_scene(d, camera=camera, scene_option=scene_option)
+    if modify_scn_fn is not None:
+      modify_scn_fn(renderer.scene)
+    return renderer.render()
+
+  if isinstance(trajectory, list):
+    out = []
+    for i, state in enumerate(tqdm.tqdm(trajectory)):
+      if modify_scene_fns is not None:
+        modify_scene_fn = modify_scene_fns[i]
+      else:
+        modify_scene_fn = None
+      out.append(get_image(state, modify_scene_fn))
+  else:
+    out = get_image(trajectory)
+
+  renderer.close()
+  return out
