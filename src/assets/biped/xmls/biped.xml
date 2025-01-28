@@ -1,6 +1,10 @@
 <mujoco model="biped">
-  <compiler angle="radian" meshdir="/home/sorinal/biped_mujoco/mujoco_playground/mujoco_playground/_src/locomotion/biped/xmls/meshes" autolimits="true"/>
-  <option integrator="RK4"/>
+  <compiler angle="radian" meshdir="meshes" autolimits="true"/>
+  
+  <option iterations="3" ls_iterations="5" timestep="0.002" integrator="Euler">
+    <flag eulerdamp="disable"/>
+  </option>
+
   <default/>
   <asset>
     <mesh name="base_link" file="base_link.STL"/>
