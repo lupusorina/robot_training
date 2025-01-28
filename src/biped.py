@@ -85,7 +85,7 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-XML_PATH = '../assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
+XML_PATH = 'assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
 ROOT_BODY = "torso"
 FEET_SITES = ["l_foot", "r_foot"]
 LEFT_FEET_GEOMS = ["l_foot1"]
@@ -461,6 +461,7 @@ class Biped():
       contact: jax.Array,
   ) -> dict[str, jax.Array]:
     del metrics  # Unused.
+
     return {
         # Tracking rewards.
         "tracking_lin_vel": self._reward_tracking_lin_vel(
