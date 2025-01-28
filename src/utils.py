@@ -21,9 +21,7 @@ def get_rz(
 
   x = (phi + jp.pi) / (2 * jp.pi)
   stance = cubic_bezier_interpolation(0, swing_height, 2 * x)
-  print(stance)
   swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
-  print(swing)
   return jp.where(x <= 0.5, stance, swing)
 
 
