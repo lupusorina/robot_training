@@ -79,9 +79,9 @@ make_networks_factory = functools.partial(
 
 train_fn = functools.partial(
     ppo.train,
-    num_timesteps=1000,
-    num_evals=1,
-    episode_length=2,
+    num_timesteps=100_000,
+    num_evals=10,
+    episode_length=200,
     num_envs=32,
     num_eval_envs=4,
     batch_size=32,
@@ -116,10 +116,9 @@ params = model.load_params(f'{FOLDER_SAVE}/{MODEL_NAME}')
 
 env = CartPoleJax(xml_model=xml_model, backend='mjx')
 
-print('env.action_size', env.action_size)
-print('env.observation_size', env.observation_size)
-
-ppoTEST = ppo.ppo_networks.make_ppo_networks(action_size=env.action_size, observation_size=env.observation_size)
+ppoTEST = ppo.ppo_networks.make_ppo_networks(action_size=env.action_size,
+                                             observation_size=env.observation_size,
+                                             policy_hidden_layer_sizes=(128, 128, 128, 128))
 make_inference = ppo.ppo_networks.make_inference_fn(ppoTEST)
 inference_fn = make_inference(params)
 jit_inference_fn = jax.jit(inference_fn)
