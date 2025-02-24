@@ -3,16 +3,17 @@
   Modified by Sorina Lupu (eslupu@caltech.edu)
 """
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import jax
 import jax.numpy as jp
 from ml_collections import config_dict
-
 import mujoco
 from mujoco import mjx
 from mujoco.mjx._src import math
+
 import numpy as np
+import os
 
 import utils
 from utils import geoms_colliding
@@ -85,7 +86,10 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-XML_PATH = 'assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
+# global path
+parent_dir = os.path.abspath(os.path.join(os.getcwd()))
+
+XML_PATH = os.path.join(parent_dir, 'assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml')
 ROOT_BODY = "torso"
 FEET_SITES = ["l_foot", "r_foot"]
 LEFT_FEET_GEOMS = ["l_foot1"]
