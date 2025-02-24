@@ -43,7 +43,8 @@ import os
 
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
-from brax.envs.base import PipelineEnv, State
+
+from cart_pole import CartPoleJax
 
 # Load the MJCF model.
 sys = mjcf.loads(xml_model)
@@ -58,78 +59,14 @@ state = init_fn(
     sys=sys, q=sys.init_q, qd=jnp.zeros(sys.qd_size()),
 )
 
-class CartPole(PipelineEnv):
-    """ Environment for training Cart Pole balancing """
-
-    def __init__(self, xml_model: str, backend: str = 'mjx', **kwargs):
-        # Initialize System:
-        sys = mjcf.loads(xml_model)
-        self.step_dt = 0.02
-        n_frames = kwargs.pop('n_frames', int(self.step_dt / sys.opt.timestep))
-        super().__init__(sys, backend=backend, n_frames=n_frames)
-
-    def reset(self, rng: jax.Array) -> State:
-        key, theta_key, qd_key = jax.random.split(rng, 3)
-
-        theta_init = jax.random.uniform(theta_key, (1,), minval=-0.1, maxval=0.1)[0]
-
-        q_init = jnp.array([0.0, theta_init])
-        qd_init = jax.random.uniform(qd_key, (2,), minval=-0.1, maxval=0.1)        
-        pipeline_state = self.pipeline_init(q_init, qd_init)
-        reward, done = jnp.zeros(2)
-        observation = self.get_observation(pipeline_state)
-
-        metrics = {
-            'rewards': reward,
-            'observation': observation,
-        }
-
-        state = State(
-            pipeline_state=pipeline_state,
-            obs=observation,
-            reward=reward,
-            done=done,
-            metrics=metrics,
-        )
-
-        return state
-
-    def step(self, state: State, action: jax.Array) -> State:
-        pipeline_state = self.pipeline_step(state.pipeline_state, action)
-        observation = self.get_observation(pipeline_state)
-        x, th = pipeline_state.q
-
-        outside_x = jnp.abs(x) > 1.0
-        outside_th = jnp.abs(th) > jnp.pi / 2
-        done = outside_x | outside_th
-        done = jnp.float32(done)
-
-        reward = jnp.cos(th)
-
-        metrics = {
-            'rewards': reward,
-            'observation': observation,
-        }
-        state.metrics.update(metrics)
-
-        state = state.replace(
-            pipeline_state=pipeline_state, obs=observation, reward=reward, done=done,
-        )
-        return state
-
-    def get_observation(self, pipeline_state: State) -> jnp.ndarray:
-        # Observation: [x, th, dx, dth]
-        return jnp.concatenate([pipeline_state.q, pipeline_state.qd])
-
-
 DATE = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 FOLDER_SAVE = f'logs/results'
 os.makedirs(f'{FOLDER_SAVE}', exist_ok=True)
 print(f'Logs will be saved in {FOLDER_SAVE}')
 
 print("Start training the CartPole Environment")
-env = CartPole(xml_model=xml_model, backend='mjx')
-eval_env = CartPole(xml_model=xml_model, backend='mjx')
+env = CartPoleJax(xml_model=xml_model, backend='mjx')
+eval_env = CartPoleJax(xml_model=xml_model, backend='mjx')
 
 def progress_fn(current_step, metrics):
     if current_step > 0:
@@ -159,24 +96,34 @@ train_fn = functools.partial(
     seed=0
 )
 
-make_policy_fn, params, _ = train_fn(
-    environment=env,
-    progress_fn=progress_fn,
-    eval_env=eval_env,
-)
-print("Training Complete")
-
+TRAIN = True
 MODEL_NAME = 'model.pkl'
-model.save_params(f'{FOLDER_SAVE}/{MODEL_NAME}', params)
 
+if TRAIN == True:
+    print("Training the model")
+    make_policy_fn, params, _ = train_fn(
+        environment=env,
+        progress_fn=progress_fn,
+        eval_env=eval_env,
+    )
+    model.save_params(f'{FOLDER_SAVE}/{MODEL_NAME}', params)
+    print("Training Complete")
+else:
+    print("Skipping Training")
 
 # Inference with JIT.
 params = model.load_params(f'{FOLDER_SAVE}/{MODEL_NAME}')
 
-env = CartPole(xml_model=xml_model, backend='mjx')
+env = CartPoleJax(xml_model=xml_model, backend='mjx')
 
-inference_fn = make_policy_fn(params)
+print('env.action_size', env.action_size)
+print('env.observation_size', env.observation_size)
+
+ppoTEST = ppo.ppo_networks.make_ppo_networks(action_size=env.action_size, observation_size=env.observation_size)
+make_inference = ppo.ppo_networks.make_inference_fn(ppoTEST)
+inference_fn = make_inference(params)
 jit_inference_fn = jax.jit(inference_fn)
+
 reset_fn = jax.jit(env.reset)
 step_fn = jax.jit(env.step)
 
