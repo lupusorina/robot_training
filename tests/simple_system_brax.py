@@ -2,7 +2,9 @@
 # JAX Imports.
 import jax
 import jax.numpy as jnp
+import time
 
+time_start = time.time()
 xml_model = """
 <mujoco model="inverted pendulum">
     <compiler inertiafromgeom="true"/>
@@ -115,11 +117,10 @@ else:
 params = model.load_params(f'{FOLDER_SAVE}/{MODEL_NAME}')
 
 env = CartPoleJax(xml_model=xml_model, backend='mjx')
-
-ppoTEST = ppo.ppo_networks.make_ppo_networks(action_size=env.action_size,
+ppo_test = ppo.ppo_networks.make_ppo_networks(action_size=env.action_size,
                                              observation_size=env.observation_size,
                                              policy_hidden_layer_sizes=(128, 128, 128, 128))
-make_inference = ppo.ppo_networks.make_inference_fn(ppoTEST)
+make_inference = ppo.ppo_networks.make_inference_fn(ppo_test)
 inference_fn = make_inference(params)
 jit_inference_fn = jax.jit(inference_fn)
 
@@ -141,6 +142,8 @@ print("Simulation Complete")
     
 # MJX Backend Requires Contact Information even if it does not exist.
 state_history = list(map(lambda x: x.replace(contact=None), state_history))
+time_end = time.time()
+print(f'Time taken: {time_end - time_start:.2f}s')
 
 # Render the HTML content to a local server.
 from flask import Flask, render_template_string
