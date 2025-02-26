@@ -6,6 +6,13 @@ pip3 install -r requirements.txt
 
 Code running with python 3.12.
 
+## Run biped training code
+
+```
+cd src/
+python3 train.py
+```
+
 ## File structure
 
 ```
