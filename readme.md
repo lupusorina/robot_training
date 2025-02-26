@@ -1,3 +1,10 @@
+## Install requirements
+
+```
+pip3 install -r requirements.txt
+```
+
+Code running with python 3.12.
 
 ## File structure
 
