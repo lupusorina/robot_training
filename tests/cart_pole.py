@@ -105,12 +105,11 @@ import mujoco.viewer
 class CartPole():
     """ Environment for training cart pole balancing """
 
-    def __init__(self, visualize_mujoco=True):
+    def __init__(self, visualize_mujoco=False):
         self.visualize_mujoco = visualize_mujoco
-        self.model = mj.Model.from_xml(XML_MODEL)
+        self.model = mj.MjModel.from_xml_string(XML_MODEL)
         self.data = mj.MjData(self.model)
         if self.visualize_mujoco is True:
-            self.get_logger().info("Start visualization!")
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
 
     def reset(self):
