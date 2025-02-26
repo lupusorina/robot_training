@@ -32,9 +32,8 @@ def default_config() -> config_dict.ConfigDict:
           level=1.0,  # Set to 0.0 to disable noise.
           scales=config_dict.create(
               hip_pos=0.03,  # rad
-              kfe_pos=0.05,
-              ffe_pos=0.08,
-              faa_pos=0.03,
+              knee_pos=0.0,
+              ankle_pos=0.0,
               joint_vel=1.5,  # rad/s
               gravity=0.05,
               linvel=0.1,
@@ -85,11 +84,11 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-XML_PATH = '/home/biped/leo/robot_training/src/assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml'
-ROOT_BODY = "torso"
+XML_PATH = '/home/biped/leo/robot_training/src/assets/biped/xmls/scene_mjx_feetonly_flat_terrain.xml'
+ROOT_BODY = "base_link"
 FEET_SITES = ["l_foot", "r_foot"]
-LEFT_FEET_GEOMS = ["l_foot1"]
-RIGHT_FEET_GEOMS = ["r_foot1"]
+LEFT_FEET_GEOMS = ["L_FOOT_GEOM"]
+RIGHT_FEET_GEOMS = ["R_FOOT_GEOM"]
 FEET_GEOMS = LEFT_FEET_GEOMS + RIGHT_FEET_GEOMS
 GRAVITY_SENSOR = "upvector"
 GLOBAL_LINVEL_SENSOR = "global_linvel"
@@ -97,7 +96,7 @@ GLOBAL_ANGVEL_SENSOR = "global_angvel"
 LOCAL_LINVEL_SENSOR = "local_linvel"
 ACCELEROMETER_SENSOR = "accelerometer"
 GYRO_SENSOR = "gyro"
-IMU_SITE = "imu"
+IMU_SITE = "imu_location"
 
 class Biped():
   """Track a joystick command."""
@@ -138,28 +137,31 @@ class Biped():
     self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
     self._soft_q_j_max = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
 
+    sides = ["L", "R"]  # left, right
+    hip_joint_names = ["YAW", "HAA", "HFE"]
+    knee_joint_names = ["KFE"]
+    ankle_joint_names = ["ANKLE"]
     # Indices joints.
     hip_indices = []
-    hip_joint_names = ["HR", "HAA"]
-    for side in ["LL", "LR"]:
+    for side in sides:
       for joint_name in hip_joint_names:
-        hip_indices.append(self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7)
-    self._hip_indices = jp.array(hip_indices) # For hip reward deviation.
+        idx = self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7
+        hip_indices.append(idx)
+    self._hip_indices = jp.array(hip_indices)
 
     knee_indices = []
-    for side in ["LL", "LR"]:
-      knee_indices.append(self._mj_model.joint(f"{side}_KFE").qposadr[0] - 7)
-    self._knee_indices = jp.array(knee_indices) # For knee reward deviation.
-    
-    ffe_indices = []
-    for side in ["LL", "LR"]:
-      ffe_indices.append(self._mj_model.joint(f"{side}_FFE").qposadr[0] - 7)
-    self._ffe_indices = jp.array(ffe_indices) # For ffe reward deviation.
-    
-    faa_indices = []
-    for side in ["LL", "LR"]:
-      faa_indices.append(self._mj_model.joint(f"{side}_FAA").qposadr[0] - 7)
-    self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
+    for side in sides:
+      for joint_name in knee_joint_names:
+        idx = self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7
+        knee_indices.append(idx)
+    self._knee_indices = jp.array(knee_indices)
+
+    ankle_indices = []
+    for side in sides:
+      for joint_name in ankle_joint_names:
+        idx = self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7
+        ankle_indices.append(idx)
+    self._ankle_indices = jp.array(ankle_indices)
 
     self._imu_site_id = self._mj_model.site(IMU_SITE).id
 
@@ -179,11 +181,15 @@ class Biped():
     self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
 
     q_j_noise_scale = np.zeros(self._nb_joints)
-    hip_ids = [0, 1, 2, 6, 7, 8] # TODO fix this hardcoded thing
-    q_j_noise_scale[hip_ids] = self._config.noise_config.scales.hip_pos
-    q_j_noise_scale[self._knee_indices] = self._config.noise_config.scales.kfe_pos
-    q_j_noise_scale[self._ffe_indices] = self._config.noise_config.scales.ffe_pos
-    q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
+    # TODO: hip ids might be wrong. Also unsure what this noise scaling is...
+    # Since scaling, might be 1.0 but leaving it 0.0. Will need to ask
+    # Sorina about this.
+    for idx in self._hip_indices:
+      q_j_noise_scale[idx] = self._config.noise_config.scales.hip_pos
+    for idx in self._knee_indices:
+      q_j_noise_scale[idx] = self._config.noise_config.scales.knee_pos
+    for idx in self._ankle_indices:
+      q_j_noise_scale[idx] = self._config.noise_config.scales.ankle_pos
     self._q_j_noise_scale = jp.array(q_j_noise_scale)
 
   def reset(self, rng: jax.Array) -> utils.State:
@@ -572,8 +578,8 @@ class Biped():
 
   def _cost_joint_angles(self, q_joints: jax.Array) -> jax.Array:
     weights = jp.array([
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
+        1.0, 1.0, 0.01, 0.01, 1.0,  # left leg.
+        1.0, 1.0, 0.01, 0.01, 1.0,  # right leg.
     ])
     return jp.sum(jp.square(q_joints - self._default_q_joints) * weights)
 
