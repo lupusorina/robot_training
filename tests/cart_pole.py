@@ -1,9 +1,8 @@
 from brax.envs.base import PipelineEnv, State
 import jax
 import jax.numpy as jnp
-from brax.io import mjcf, html
+from brax.io import mjcf
 import numpy as np
-
 
 XML_MODEL = """
 <mujoco model="inverted pendulum">
@@ -33,6 +32,8 @@ XML_MODEL = """
 
 </mujoco>
 """
+
+# Environment with JAX.
 
 class CartPoleJax(PipelineEnv):
     """ Environment in JAX for training cart pole balancing """
@@ -99,11 +100,14 @@ class CartPoleJax(PipelineEnv):
         # Observation: [x, th, dx, dth]
         return jnp.concatenate([pipeline_state.q, pipeline_state.qd])
 
+
+# Environment without JAX.
+
 import mujoco as mj
 import mujoco.viewer
 
 class CartPole():
-    """ Environment for training cart pole balancing """
+    """ Environment for training cart pole balancing. """
 
     def __init__(self, visualize_mujoco=False):
         self.visualize_mujoco = visualize_mujoco
@@ -113,8 +117,10 @@ class CartPole():
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
 
     def reset(self):
-        self.data.qpos = np.array([0, 0])
-        self.data.qvel = np.array([0, 0])
+        random_angle = np.random.uniform(-0.1, 0.1)
+        random_vel = np.random.uniform(-0.1, 0.1)
+        self.data.qpos = np.array([0, random_angle])
+        self.data.qvel = np.array([0, random_vel])
         return self._get_observation()
 
     def step(self, action):
@@ -123,7 +129,6 @@ class CartPole():
         if self.visualize_mujoco is True:
             if self.viewer.is_running():
                 self.viewer.sync()
-
         return self._get_observation(), self._get_reward(), self._get_done(), {}
 
     def _get_observation(self):
@@ -142,7 +147,6 @@ def main():
     for i in range(200):
         action = np.random.uniform(-3, 3)
         obs, _, _, _ = env.step(action)
-
 
 if __name__ == '__main__':
     main()
