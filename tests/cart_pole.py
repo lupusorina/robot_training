@@ -35,7 +35,7 @@ XML_MODEL = """
 """
 
 class CartPoleJax(PipelineEnv):
-    """ Environment for training Cart Pole balancing """
+    """ Environment in JAX for training cart pole balancing """
 
     def __init__(self, backend: str = 'mjx', **kwargs):
         # Initialize System:
@@ -98,3 +98,52 @@ class CartPoleJax(PipelineEnv):
     def get_observation(self, pipeline_state: State) -> jnp.ndarray:
         # Observation: [x, th, dx, dth]
         return jnp.concatenate([pipeline_state.q, pipeline_state.qd])
+
+import mujoco as mj
+import mujoco.viewer
+
+class CartPole():
+    """ Environment for training cart pole balancing """
+
+    def __init__(self, visualize_mujoco=True):
+        self.visualize_mujoco = visualize_mujoco
+        self.model = mj.Model.from_xml(XML_MODEL)
+        self.data = mj.MjData(self.model)
+        if self.visualize_mujoco is True:
+            self.get_logger().info("Start visualization!")
+            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+
+    def reset(self):
+        self.data.qpos = np.array([0, 0])
+        self.data.qvel = np.array([0, 0])
+        return self._get_observation()
+
+    def step(self, action):
+        self.data.ctrl = np.array([action])
+        mj.mj_step(self.model, self.data)
+        if self.visualize_mujoco is True:
+            if self.viewer.is_running():
+                self.viewer.sync()
+
+        return self._get_observation(), self._get_reward(), self._get_done(), {}
+
+    def _get_observation(self):
+        return np.concatenate([self.data.qpos, self.data.qvel])
+
+    def _get_reward(self):
+        return np.cos(self.data.qpos[1])
+
+    def _get_done(self):
+        return np.abs(self.data.qpos[0]) > 1.0 or np.abs(self.data.qpos[1]) > np.pi / 2
+
+def main():
+    env = CartPole()
+    obs = env.reset()
+
+    for i in range(200):
+        action = np.random.uniform(-3, 3)
+        obs, _, _, _ = env.step(action)
+
+
+if __name__ == '__main__':
+    main()
