@@ -1,0 +1,4 @@
+matplotlib
+mediapy
+brax
+jax[cuda12]
