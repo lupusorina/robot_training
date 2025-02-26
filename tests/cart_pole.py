@@ -118,9 +118,8 @@ class CartPole():
 
     def reset(self):
         random_angle = np.random.uniform(-0.1, 0.1)
-        random_vel = np.random.uniform(-0.1, 0.1)
         self.data.qpos = np.array([0, random_angle])
-        self.data.qvel = np.array([0, random_vel])
+        self.data.qvel = np.random.uniform(-0.1, 0.1, 2)
         return self._get_observation()
 
     def step(self, action):
