@@ -203,5 +203,6 @@ frames = eval_env.render(
     modify_scene_fns=mod_fns,
 )
 
-# media.show_video(frames, fps=fps, loop=False)
+media.show_video(frames, fps=fps, loop=False)
+
 media.write_video(f'{VIDEO_FOLDER}/joystick.mp4', frames, fps=fps)
