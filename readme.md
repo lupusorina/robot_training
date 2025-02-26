@@ -17,7 +17,14 @@ python3 train.py
 
 ```
 src/
-└── short_range/
+└── biped.py                   (Biped in Jax)
+└── train.py                   (Train PPO on Biped)
+└── mjx_env.py                 (file taken from mujoco-playground)
+└── wrapper.py                 (file taken from mujoco-playground)
+└── assets
+    └── berkeley_humanoid       (Berkeley Biped model)
+    └── biped                   (biped)
+
 tests/
 └── cart_pole.py                (Cart Pole for MuJoCo (both JAX and NP))
 └── train_brax.py               (Train PPO on Brax) - envs in parallel
