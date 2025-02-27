@@ -4,7 +4,17 @@
 pip3 install -r requirements.txt
 ```
 
-Code running with python 3.12.
+Code running with Python3.12.
+
+## Install Brax
+(I use the master branch in Brax)
+
+First, clone the Brax repo, then install it:
+```
+cd brax
+pip3 install -e .
+```
+
 
 ## Run biped training code
 
@@ -12,6 +22,8 @@ Code running with python 3.12.
 cd src/
 python3 train.py
 ```
+
+Inference: test.ipynb
 
 ## File structure
 
