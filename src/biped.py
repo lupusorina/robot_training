@@ -354,7 +354,8 @@ class Biped():
 
   def _get_termination(self, data: mjx.Data) -> jax.Array:
     gravity = self.get_sensor_data(data, GRAVITY_SENSOR)
-    fall_termination = gravity[-1] < 0.0
+    # fall_termination = gravity[-1] < 0.0
+    fall_termination = data.qpos[2] < 0.3 # z position of the base_link
     return (
         fall_termination | jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
     )
