@@ -30,7 +30,9 @@ Inference: test.ipynb
 ```
 src/
     └── biped.py                   (Biped in Jax)
+    └── biped_berkeley.py          (Berkeley Biped in Jax)
     └── train.py                   (Train PPO on Biped)
+    └── test.ipynb                 (Jupyter notebook for testing)
     └── mjx_env.py                 (file taken from mujoco-playground)
     └── wrapper.py                 (file taken from mujoco-playground)
     └── assets
