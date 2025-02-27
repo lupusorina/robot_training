@@ -32,40 +32,36 @@ np.set_printoptions(precision=3, suppress=True, linewidth=100)
 
 from datetime import datetime
 import functools
-from biped import Biped
+from biped_berkeley import Biped
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
-from brax.io import model
-from IPython.display import HTML, clear_output
-import jax
-from jax import numpy as jp
+from IPython.display import clear_output
 from matplotlib import pyplot as plt
-import mediapy as media
-import mujoco
 import numpy as np
 from ml_collections import config_dict
 from wrapper import wrap_for_brax_training
 
-
+# Folders.
 FOLDER_RESULTS = 'results'
-TIME_NOW = datetime.now().strftime('%Y%m%d-%H%M%S')
-if not os.path.exists(os.path.join(FOLDER_RESULTS, TIME_NOW)):
-    os.makedirs(os.path.join(FOLDER_RESULTS, TIME_NOW))
-FOLDER_RESULTS = os.path.join(FOLDER_RESULTS, TIME_NOW)
+time_now = datetime.now().strftime('%Y%m%d-%H%M%S')
+if not os.path.exists(os.path.join(FOLDER_RESULTS, time_now)):
+    os.makedirs(os.path.join(FOLDER_RESULTS, time_now))
+FOLDER_RESULTS = os.path.join(FOLDER_RESULTS, time_now)
+ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
+print(f"Saving results to {ABS_FOLDER_RESUlTS}")
+
 FOLDER_PLOTS = 'plots'
-if not os.path.exists(os.path.join(FOLDER_PLOTS, TIME_NOW)):
-    os.makedirs(os.path.join(FOLDER_PLOTS, TIME_NOW))
-FOLDER_PLOTS = os.path.join(FOLDER_PLOTS, TIME_NOW)
+if not os.path.exists(os.path.join(FOLDER_PLOTS, time_now)):
+    os.makedirs(os.path.join(FOLDER_PLOTS, time_now))
+FOLDER_PLOTS = os.path.join(FOLDER_PLOTS, time_now)
+
 VIDEO_FOLDER = 'videos'
-if not os.path.exists(os.path.join(VIDEO_FOLDER, TIME_NOW)):
-    os.makedirs(os.path.join(VIDEO_FOLDER, TIME_NOW))
-VIDEO_FOLDER = os.path.join(VIDEO_FOLDER, TIME_NOW)
+if not os.path.exists(os.path.join(VIDEO_FOLDER, time_now)):
+    os.makedirs(os.path.join(VIDEO_FOLDER, time_now))
+VIDEO_FOLDER = os.path.join(VIDEO_FOLDER, time_now)
 
-env_name = 'Biped'
-env = Biped()
 
-from utils import draw_joystick_command
-
+# Brax PPO config.
 brax_ppo_config = config_dict.create(
       num_timesteps=150_000_000,
       num_evals=15,
@@ -93,7 +89,9 @@ brax_ppo_config = config_dict.create(
   )
 ppo_params = brax_ppo_config
 
-env_name = 'Biped'
+# Environment.
+env_name = 'Berkeley Biped'
+print(f"Starting training for {env_name}")
 env = Biped()
 
 x_data, y_data, y_dataerr = [], [], []
@@ -127,7 +125,8 @@ if "network_factory" in ppo_params:
 train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),
     network_factory=network_factory,
-    progress_fn=progress
+    progress_fn=progress,
+    save_checkpoint_path=ABS_FOLDER_RESUlTS,
 )
 
 make_inference_fn, params, metrics = train_fn(
@@ -138,10 +137,3 @@ make_inference_fn, params, metrics = train_fn(
 )
 print(f"time to jit: {times[1] - times[0]}")
 print(f"time to train: {times[-1] - times[1]}")
-
-MODEL_NAME = 'model_brax.pkl'
-FOLDER_SAVE = 'logs'
-if not os.path.exists(FOLDER_SAVE):
-    os.makedirs(FOLDER_SAVE)
-model.save_params(f'{FOLDER_SAVE}/{MODEL_NAME}', params)
-print("Training Complete")
