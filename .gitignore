@@ -2,3 +2,5 @@ __pycache__
 *.mp4
 *.png
 *.pdf
+.venv
+runs
