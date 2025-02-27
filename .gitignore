@@ -4,3 +4,4 @@ __pycache__
 *.pdf
 .venv
 runs
+.DS_Store
