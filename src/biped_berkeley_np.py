@@ -129,6 +129,7 @@ class Biped(MujocoEnv, utils.EzPickle):
         self.data = mujoco.MjData(self._mj_model)
         self._mj_model.opt.timestep = self._sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
+        self.paused = False
         print(f"Number of joints: {self._nb_joints}")
         print(f"Nb controls: {self._mj_model.nu}")
         print(self.data.ctrl.shape)
@@ -136,9 +137,8 @@ class Biped(MujocoEnv, utils.EzPickle):
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
         self._mj_model.vis.global_.offheight = 2160
-        self.visualize_mujoco = False
+        self.visualize_mujoco = True
         if self.visualize_mujoco is True:
-            self.get_logger().info("Start visualization!")
             self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data)
 
         # Info.
@@ -251,6 +251,7 @@ class Biped(MujocoEnv, utils.EzPickle):
             # "push_interval_steps": push_interval_steps
         }
         observation = self._get_obs()
+        mujoco.mj_step(self._mj_model, self.data)
         return observation
     
     def step(self, action: np.ndarray) -> tuple:
@@ -260,7 +261,8 @@ class Biped(MujocoEnv, utils.EzPickle):
         self.data.ctrl = motor_targets
 
         # Step the model.
-        mujoco.mj_step(self._mj_model, self.data)
+        if not self.paused:
+            mujoco.mj_step(self._mj_model, self.data)
         
         # Visualize.
         if self.visualize_mujoco is True:
@@ -272,7 +274,7 @@ class Biped(MujocoEnv, utils.EzPickle):
         done = self._get_termination()
 
         # rewards, reward_info = self._get_rew()
-        
+
         # return observation, reward, terminated, False, info
         return obs, None, done, False, self.info
     
@@ -281,7 +283,7 @@ class Biped(MujocoEnv, utils.EzPickle):
         # Gyroscope.
         gyro = self.get_sensor_data(GYRO_SENSOR)
         noisy_gyro = gyro.copy() # TODO: add  noise
-        
+
         # Gravity.
         R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3)
         gravity = R_gravity_sensor.T @ np.array([0, 0, -1]) # TODO: check this
@@ -290,11 +292,11 @@ class Biped(MujocoEnv, utils.EzPickle):
         # Joint angles.
         joint_angles = self.data.qpos[7:]
         noisy_joint_angles = joint_angles.copy()
-        
+
         # Joint velocities.
         joint_vel = self.data.qvel[6:]
         noisy_joint_vel = joint_vel.copy()
-        
+
         # Phase.
         cos = np.cos(self.info["phase"])
         sin = np.sin(self.info["phase"])
@@ -317,11 +319,11 @@ class Biped(MujocoEnv, utils.EzPickle):
         ]) # 52
 
         return self._state
-    
+
     def _get_rew(self):
         # return reward, reward_info
         pass
-    
+
     def _get_termination(self):
         gravity = self.get_sensor_data(GRAVITY_SENSOR)
         fall_termination = gravity[-1] < 0.0
@@ -346,18 +348,17 @@ class Biped(MujocoEnv, utils.EzPickle):
         assert self._state.size == 52
         return (self._state.size, )
 
+
 def main():
     biped = Biped()
     biped.reset_model()
-    print(biped.data.qpos)
-    print(biped.data.qvel)
-    
+
     for _ in tqdm.tqdm(range(1000)):
         action = np.random.uniform(-1, 1, biped.action_size)
         obs, rewards, done, _, _ = biped.step(action)
-        if done:
-            print("Done!")
-            break
+        # if done:
+        #     print("Done!")
+        #     break
 
 if __name__ == "__main__":
     main()        
