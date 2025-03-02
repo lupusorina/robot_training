@@ -86,22 +86,26 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-# global path
-parent_dir = os.path.abspath(os.path.join(os.getcwd()))
 
-XML_PATH = os.path.join(parent_dir, 'assets/berkeley_humanoid/xmls/scene_mjx_feetonly_flat_terrain.xml')
-ROOT_BODY = "torso"
-FEET_SITES = ["l_foot", "r_foot"]
-LEFT_FEET_GEOMS = ["l_foot1"]
-RIGHT_FEET_GEOMS = ["r_foot1"]
-FEET_GEOMS = LEFT_FEET_GEOMS + RIGHT_FEET_GEOMS
-GRAVITY_SENSOR = "upvector"
-GLOBAL_LINVEL_SENSOR = "global_linvel"
-GLOBAL_ANGVEL_SENSOR = "global_angvel"
-LOCAL_LINVEL_SENSOR = "local_linvel"
-ACCELEROMETER_SENSOR = "accelerometer"
-GYRO_SENSOR = "gyro"
-IMU_SITE = "imu"
+NAME_ROBOT = 'biped'
+if NAME_ROBOT == 'berkeley_humanoid':
+    import assets.berkeley_humanoid.config as robot_config
+if NAME_ROBOT == 'biped':
+    import assets.biped.config as robot_config
+    # raise NotImplementedError
+
+XML_PATH = robot_config.XML_PATH
+ROOT_BODY = robot_config.ROOT_BODY
+FEET_SITES = robot_config.FEET_SITES
+FEET_GEOMS = robot_config.FEET_GEOMS
+GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
+GLOBAL_LINVEL_SENSOR = robot_config.GLOBAL_LINVEL_SENSOR
+GLOBAL_ANGVEL_SENSOR = robot_config.GLOBAL_ANGVEL_SENSOR
+LOCAL_LINVEL_SENSOR = robot_config.LOCAL_LINVEL_SENSOR
+ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
+GYRO_SENSOR = robot_config.GYRO_SENSOR
+IMU_SITE = robot_config.IMU_SITE
+HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 class Biped():
   """Track a joystick command."""
@@ -142,28 +146,44 @@ class Biped():
     self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
     self._soft_q_j_max = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
 
-    # Indices joints.
+    q_j_noise_scale = np.zeros(self._nb_joints) # For joint noise.
+
     hip_indices = []
-    hip_joint_names = ["HR", "HAA"]
-    for side in ["LL", "LR"]:
-      for joint_name in hip_joint_names:
-        hip_indices.append(self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7)
-    self._hip_indices = jp.array(hip_indices) # For hip reward deviation.
+    hip_joint_names = robot_config.HIP_JOINT_NAMES
+    if len(hip_joint_names) != 0:
+        for side in robot_config.SIDES:
+            for joint_name in hip_joint_names:
+                hip_indices.append(self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7)
+        self._hip_indices = jp.array(hip_indices) # For hip reward deviation.
+        q_j_noise_scale[self._hip_indices] = self._config.noise_config.scales.hip_pos
 
     knee_indices = []
-    for side in ["LL", "LR"]:
-      knee_indices.append(self._mj_model.joint(f"{side}_KFE").qposadr[0] - 7)
-    self._knee_indices = jp.array(knee_indices) # For knee reward deviation.
-    
-    ffe_indices = []
-    for side in ["LL", "LR"]:
-      ffe_indices.append(self._mj_model.joint(f"{side}_FFE").qposadr[0] - 7)
-    self._ffe_indices = jp.array(ffe_indices) # For ffe reward deviation.
-    
-    faa_indices = []
-    for side in ["LL", "LR"]:
-      faa_indices.append(self._mj_model.joint(f"{side}_FAA").qposadr[0] - 7)
-    self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
+    knee_joint_names = robot_config.KNEE_JOINT_NAMES
+    if len(knee_joint_names) != 0:
+        for side in robot_config.SIDES:
+            for knee_joint_name in knee_joint_names:
+                knee_indices.append(self._mj_model.joint(f"{side}_{knee_joint_name}").qposadr[0] - 7)
+        self._knee_indices = jp.array(knee_indices) # For knee reward deviation.
+        q_j_noise_scale[self._knee_indices] = self._config.noise_config.scales.kfe_pos
+
+    ffe_joint_names = robot_config.ANKLE_FE_JOINT_NAMES
+    if len(ffe_joint_names) != 0:
+        ffe_indices = []
+        for side in robot_config.SIDES:
+            for ffe_joint_name in ffe_joint_names:
+                ffe_indices.append(self._mj_model.joint(f"{side}_{ffe_joint_name}").qposadr[0] - 7)
+        self._ffe_indices = jp.array(ffe_indices) # For ffe reward deviation.
+        q_j_noise_scale[self._ffe_indices] = self._config.noise_config.scales.ffe_pos
+
+    faa_joint_names = robot_config.ANKLE_AA_JOINT_NAMES
+    if len(faa_joint_names) != 0:
+        faa_indices = []
+        for side in robot_config.SIDES:
+            for faa_joint_name in faa_joint_names:
+                faa_indices.append(self._mj_model.joint(f"{side}_{faa_joint_name}").qposadr[0] - 7)
+        self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
+        q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
+    self._q_j_noise_scale = jp.array(q_j_noise_scale)
 
     self._imu_site_id = self._mj_model.site(IMU_SITE).id
 
@@ -181,14 +201,6 @@ class Biped():
           list(range(sensor_adr, sensor_adr + sensor_dim))
       )
     self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
-
-    q_j_noise_scale = np.zeros(self._nb_joints)
-    hip_ids = [0, 1, 2, 6, 7, 8] # TODO fix this hardcoded thing
-    q_j_noise_scale[hip_ids] = self._config.noise_config.scales.hip_pos
-    q_j_noise_scale[self._knee_indices] = self._config.noise_config.scales.kfe_pos
-    q_j_noise_scale[self._ffe_indices] = self._config.noise_config.scales.ffe_pos
-    q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
-    self._q_j_noise_scale = jp.array(q_j_noise_scale)
 
   def reset(self, rng: jax.Array) -> utils.State:
     qpos = self._init_q
