@@ -104,14 +104,6 @@ IMU_SITE = "imu"
 
 class Biped(MujocoEnv, utils.EzPickle):
     """Track a joystick command."""
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-            "depth_array",
-            "rgbd_tuple",
-        ],
-    }
 
     def __init__(self,
       config: config_dict.ConfigDict = default_config(),
