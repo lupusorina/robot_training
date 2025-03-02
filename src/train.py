@@ -32,7 +32,6 @@ np.set_printoptions(precision=3, suppress=True, linewidth=100)
 
 from datetime import datetime
 import functools
-from biped_berkeley import Biped
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
 from IPython.display import clear_output
@@ -91,6 +90,10 @@ ppo_params = brax_ppo_config
 
 # Environment.
 env_name = 'Berkeley Biped'
+if env_name == "Berkeley Biped"
+  from biped_berkeley import Biped
+elif env_name == "Biped"
+  from biped import Biped
 print(f"Starting training for {env_name}")
 env = Biped()
 
