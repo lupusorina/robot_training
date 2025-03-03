@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 from ml_collections import config_dict
 import mujoco
 
-from gymnasium import utils
+from gymnasium import utils as gym_utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
 import mujoco.viewer
@@ -18,8 +18,8 @@ import mujoco.viewer
 import numpy as np
 import os
 
-# import utils
-# from utils import geoms_colliding_np
+import utils
+from utils import geoms_colliding_np, get_rz_np
 import tqdm
 
 def default_config() -> config_dict.ConfigDict:
@@ -86,7 +86,7 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-NAME_ROBOT = 'biped'
+NAME_ROBOT = 'berkeley_humanoid'
 if NAME_ROBOT == 'berkeley_humanoid':
     import assets.berkeley_humanoid.config as robot_config
 if NAME_ROBOT == 'biped':
@@ -107,7 +107,7 @@ IMU_SITE = robot_config.IMU_SITE
 HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 
-class Biped(MujocoEnv, utils.EzPickle):
+class Biped(MujocoEnv, gym_utils.EzPickle):
     """Track a joystick command."""
 
     def __init__(self,
@@ -126,7 +126,7 @@ class Biped(MujocoEnv, utils.EzPickle):
         self.data = mujoco.MjData(self._mj_model)
         self._mj_model.opt.timestep = self._sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
-        self.paused = True
+        self.paused = False
         print(f"Number of joints: {self._nb_joints}")
         print(f"Nb controls: {self._mj_model.nu}")
 
@@ -268,7 +268,20 @@ class Biped(MujocoEnv, utils.EzPickle):
         # Step the model.
         if not self.paused:
             mujoco.mj_step(self._mj_model, self.data)
-        
+
+        # Check contacts. TODO: fix this
+        # contact = np.array([
+        #     geoms_colliding_np(self.data, geom_id, self._floor_geom_id)
+        #     for geom_id in self._feet_geom_id
+        # ])
+        contact = np.zeros(2, dtype=bool)
+        contact_filt = contact | self.info["last_contact"]
+        first_contact = (self.info["feet_air_time"] > 0.0) * contact_filt
+        self.info["feet_air_time"] += self.ctrl_dt
+        p_f = self.data.site_xpos[self._feet_site_id]
+        p_fz = p_f[..., -1]
+        # self.info["swing_peak"] = np.max(self.info["swing_peak"], p_fz)
+
         # Visualize.
         if self.visualize_mujoco is True:
             if self.viewer.is_running():
@@ -278,10 +291,39 @@ class Biped(MujocoEnv, utils.EzPickle):
         obs = self._get_obs()
         done = self._get_termination()
 
-        # rewards, reward_info = self._get_rew()
+        rewards = self._get_rew(done=done,
+                    action=action,
+                    first_contact=first_contact,
+                    contact=contact)
+
+        rewards = {
+        k: v * self._config.reward_config.scales[k] for k, v in rewards.items()
+        }
+        reward = np.clip(sum(rewards.values()) * self.ctrl_dt, 0.0, 10000.0)
+
+        # self.info["push"] = push
+        self.info["step"] += 1
+        self.info["push_step"] += 1
+        phase_tp1 = self.info["phase"] + self.info["phase_dt"]
+        self.info["phase"] = np.fmod(phase_tp1 + np.pi, 2 * np.pi) - np.pi
+        self.info["last_last_act"] = self.info["last_act"]
+        self.info["last_act"] = action
+        # self.info["command"] = jp.where(
+        #     self.info["step"] > 500,
+        #     self.sample_command(cmd_rng),
+        #     self.info["command"],
+        # )
+        self.info["step"] = np.where(
+            done | (self.info["step"] > 500),
+            0,
+            self.info["step"],
+        )
+        self.info["feet_air_time"] *= ~contact
+        self.info["last_contact"] = contact
+        self.info["swing_peak"] *= ~contact
 
         # return observation, reward, terminated, False, info
-        return obs, None, done, False, self.info
+        return obs, reward, done, False, self.info
     
     def _get_obs(self) -> np.ndarray:
         """ Get observation from sensors. """
@@ -325,9 +367,57 @@ class Biped(MujocoEnv, utils.EzPickle):
 
         return self._state
 
-    def _get_rew(self):
-        # return reward, reward_info
-        pass
+    def _get_rew(self,
+                 done: bool,
+                 action: np.ndarray,
+                 first_contact:np.ndarray,
+                 contact: np.ndarray):
+        return {
+            # Tracking rewards.
+            "tracking_lin_vel": self._reward_tracking_lin_vel(
+                self.info["command"], self.get_sensor_data(LOCAL_LINVEL_SENSOR)
+            ),
+            "tracking_ang_vel": self._reward_tracking_ang_vel(
+                self.info["command"], self.get_sensor_data(GYRO_SENSOR)
+            ),
+            # Base-related rewards.
+            "lin_vel_z": self._cost_lin_vel_z(self.get_sensor_data(GLOBAL_LINVEL_SENSOR)),
+            "ang_vel_xy": self._cost_ang_vel_xy(self.get_sensor_data(GLOBAL_ANGVEL_SENSOR)),
+            "orientation": self._cost_orientation(self.get_sensor_data(GRAVITY_SENSOR)),
+            "base_height": self._cost_base_height(self.data.qpos[2]),
+            # Energy related rewards.
+            "torques": self._cost_torques(self.data.actuator_force),
+            "action_rate": self._cost_action_rate(
+                action, self.info["last_act"], self.info["last_last_act"]
+            ),
+            "energy": self._cost_energy(self.data.qvel[6:], self.data.actuator_force),
+            # Feet related rewards.
+            "feet_slip": self._cost_feet_slip(self.data, contact, self.info),
+            "feet_clearance": self._cost_feet_clearance(self.data, self.info),
+            "feet_height": self._cost_feet_height(
+                self.info["swing_peak"], first_contact, self.info
+            ),
+            "feet_air_time": self._reward_feet_air_time(
+                self.info["feet_air_time"], first_contact, self.info["command"]
+            ),
+            "feet_phase": self._reward_feet_phase(
+                self.data,
+                self.info["phase"],
+                self._config.reward_config.max_foot_height,
+                self.info["command"],
+            ),
+            # Other rewards.
+            "alive": self._reward_alive(),
+            "termination": self._cost_termination(done),
+            "stand_still": self._cost_stand_still(self.info["command"], self.data.qpos[7:]),
+            # Pose related rewards.
+            "joint_deviation_hip": self._cost_joint_deviation_hip(
+                self.data.qpos[7:], self.info["command"]
+            ),
+            "joint_deviation_knee": self._cost_joint_deviation_knee(self.data.qpos[7:]),
+            "dof_pos_limits": self._cost_joint_pos_limits(self.data.qpos[7:]),
+            "pose": self._cost_joint_angles(self.data.qpos[7:]),
+        }
 
     def _get_termination(self):
         gravity = self.get_sensor_data(GRAVITY_SENSOR)
@@ -351,6 +441,137 @@ class Biped(MujocoEnv, utils.EzPickle):
     def observation_size(self) -> tuple:
         print(self._state.size)
         return (self._state.size, )
+
+
+    # Tracking rewards.
+
+    def _reward_tracking_lin_vel(self, commands: np.ndarray, local_vel: np.ndarray, ) -> np.ndarray:
+        lin_vel_error = np.sum(np.square(commands[:2] - local_vel[:2]))
+        return np.exp(-lin_vel_error / self._config.reward_config.tracking_sigma)
+
+    def _reward_tracking_ang_vel(self, commands: np.ndarray, ang_vel: np.ndarray, ) -> np.ndarray:
+        ang_vel_error = np.square(commands[2] - ang_vel[2])
+        return np.exp(-ang_vel_error / self._config.reward_config.tracking_sigma)
+
+    # Base-related rewards.
+    def _cost_lin_vel_z(self, global_linvel) -> np.ndarray:
+        return np.square(global_linvel[2])
+
+    def _cost_ang_vel_xy(self, global_angvel) -> np.ndarray:
+        return np.sum(np.square(global_angvel[:2]))
+
+    def _cost_orientation(self, torso_zaxis: np.ndarray) -> np.ndarray:
+        return np.sum(np.square(torso_zaxis[:2]))
+
+    def _cost_base_height(self, base_height: np.ndarray) -> np.ndarray:
+        return np.square(base_height - self._config.reward_config.base_height_target)
+
+    # Energy related rewards.
+    def _cost_torques(self, torques: np.ndarray) -> np.ndarray:
+        return np.sum(np.abs(torques))
+
+    def _cost_energy(self, qvel: np.ndarray, qfrc_actuator: np.ndarray) -> np.ndarray:
+        return np.sum(np.abs(qvel) * np.abs(qfrc_actuator))
+
+    def _cost_action_rate(self, act: np.ndarray, last_act: np.ndarray, last_last_act: np.ndarray) -> np.ndarray:
+        del last_last_act  # Unused.
+        c1 = np.sum(np.square(act - last_act))
+        return c1
+
+    # Other rewards.
+    def _cost_joint_pos_limits(self, qpos: np.ndarray) -> np.ndarray:
+        out_of_limits = -np.clip(qpos - self._soft_q_j_min, None, 0.0)
+        out_of_limits += np.clip(qpos - self._soft_q_j_max, 0.0, None)
+        return np.sum(out_of_limits)
+
+    def _cost_stand_still(self, commands: np.ndarray, qpos: np.ndarray, ) -> np.ndarray:
+        cmd_norm = np.linalg.norm(commands)
+        return np.sum(np.abs(qpos - self._default_q_joints)) * (cmd_norm < 0.1)
+
+    def _cost_termination(self, done: bool) -> bool:
+        return done
+
+    def _reward_alive(self) -> np.ndarray:
+        return np.array(1.0)
+
+    # Pose-related rewards.
+    def _cost_joint_deviation_hip(self, qpos: np.ndarray, cmd: np.ndarray) -> np.ndarray:
+        cost = np.sum(np.abs(qpos[self._hip_indices] - self._default_q_joints[self._hip_indices]))
+        cost *= np.abs(cmd[1]) > 0.1
+        return cost
+
+    def _cost_joint_deviation_knee(self, qpos: np.ndarray) -> np.ndarray:
+        return np.sum(np.abs(qpos[self._knee_indices] - self._default_q_joints[self._knee_indices]))
+
+    def _cost_joint_angles(self, q_joints: np.ndarray) -> np.ndarray:
+        weights = np.array([
+            1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
+            1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
+        ])
+        return np.sum(np.square(q_joints - self._default_q_joints) * weights)
+
+    # Feet related rewards.
+    def _cost_feet_slip(self, data,
+                        contact,
+                        info: dict[str, Any]) -> np.ndarray:
+        del info  # Unused.
+        lin_vel = self.get_sensor_data(LOCAL_LINVEL_SENSOR)
+        body_vel = lin_vel[:2]
+        reward = np.sum(np.linalg.norm(body_vel, axis=-1) * contact)
+        return reward
+
+    def _cost_feet_clearance(self,
+                             data,
+                             info) -> np.ndarray:
+        del info  # Unused.
+        feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+        vel_xy = feet_vel[..., :2]
+        vel_norm = np.sqrt(np.linalg.norm(vel_xy, axis=-1))
+        foot_pos = data.site_xpos[self._feet_site_id]
+        foot_z = foot_pos[..., -1]
+        delta = np.abs(foot_z - self._config.reward_config.max_foot_height)
+        return np.sum(delta * vel_norm)
+
+    def _cost_feet_height(
+        self,
+        swing_peak: np.ndarray,
+        first_contact: np.ndarray,
+        info: dict[str, Any],
+    ) -> np.ndarray:
+        del info  # Unused.
+        error = swing_peak / self._config.reward_config.max_foot_height - 1.0
+        return np.sum(np.square(error) * first_contact)
+
+    def _reward_feet_air_time(
+        self,
+        air_time: np.ndarray,
+        first_contact: np.ndarray,
+        commands: np.ndarray,
+        threshold_min: float = 0.2,
+        threshold_max: float = 0.5,
+    ) -> np.ndarray:
+        cmd_norm = np.linalg.norm(commands)
+        air_time = (air_time - threshold_min) * first_contact
+        air_time = np.clip(air_time, a_min=0.0, a_max=threshold_max - threshold_min)
+        reward = np.sum(air_time)
+        reward *= cmd_norm > 0.1  # No reward for zero commands.
+        return reward
+
+    def _reward_feet_phase(
+        self,
+        data,
+        phase: np.ndarray,
+        foot_height: np.ndarray,
+        commands: np.ndarray,
+    ) -> np.ndarray:
+        # Reward for tracking the desired foot height.
+        del commands  # Unused.
+        foot_pos = data.site_xpos[self._feet_site_id]
+        foot_z = foot_pos[..., -1]
+        rz = utils.get_rz_np(phase, swing_height=foot_height)
+        error = np.sum(np.square(foot_z - rz))
+        reward = np.exp(-error / 0.01)
+        return reward
 
 
 def main():
