@@ -21,3 +21,6 @@ ANKLE_FE_JOINT_NAMES = ["FFE"]
 ANKLE_AA_JOINT_NAMES = ["FAA"]
 
 SIDES = ["LL", "LR"]
+
+COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
+                    1.0, 1.0, 0.01, 0.01, 1.0, 1.0]  # right leg.

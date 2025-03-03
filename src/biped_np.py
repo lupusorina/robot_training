@@ -504,10 +504,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         return np.sum(np.abs(qpos[self._knee_indices] - self._default_q_joints[self._knee_indices]))
 
     def _cost_joint_angles(self, q_joints: np.ndarray) -> np.ndarray:
-        weights = np.array([
-            1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
-            1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
-        ])
+        weights = np.array([robot_config.COSTS_JOINT_ANGLES])
         return np.sum(np.square(q_joints - self._default_q_joints) * weights)
 
     # Feet related rewards.
