@@ -3,10 +3,7 @@
   Modified by Sorina Lupu (eslupu@caltech.edu)
 """
 
-# TODO:
-#   - make the code compatible between Berkeley biped and ours.
-
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Union
 from ml_collections import config_dict
 import mujoco
 
@@ -16,7 +13,6 @@ from gymnasium.spaces import Box
 import mujoco.viewer
 
 import numpy as np
-import os
 
 import utils
 from utils import geoms_colliding_np, get_rz_np
