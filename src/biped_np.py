@@ -129,7 +129,6 @@ class Biped(MujocoEnv, utils.EzPickle):
         self.paused = True
         print(f"Number of joints: {self._nb_joints}")
         print(f"Nb controls: {self._mj_model.nu}")
-        print(self.data.ctrl.shape)
 
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
