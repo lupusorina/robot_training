@@ -587,10 +587,7 @@ class Biped():
     return jp.sum(jp.abs(qpos[self._knee_indices] - self._default_q_joints[self._knee_indices]))
 
   def _cost_joint_angles(self, q_joints: jax.Array) -> jax.Array:
-    weights = jp.array([
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
-        1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # right leg.
-    ])
+    weights = jp.array([robot_config.COSTS_JOINT_ANGLES])
     return jp.sum(jp.square(q_joints - self._default_q_joints) * weights)
 
   # Feet related rewards.
