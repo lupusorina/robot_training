@@ -218,7 +218,7 @@ class Biped():
 
     # qpos[7:]=*U(0.5, 1.5)
     rng, key = jax.random.split(rng)
-    qpos = qpos.at[7:].set(qpos[7:] * jax.random.uniform(key, (self._nb_joints,), minval=0.5, maxval=1.5))
+    qpos = qpos.at[7:].set(qpos[7:] * jax.random.uniform(key, (self._nb_joints,), minval=-0.05, maxval=0.05))
 
     # d(xyzrpy)=U(-0.5, 0.5)
     rng, key = jax.random.split(rng)
