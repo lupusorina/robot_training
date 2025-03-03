@@ -24,6 +24,19 @@ def get_rz(
   swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
   return jp.where(x <= 0.5, stance, swing)
 
+def get_rz_np(
+    phi: Union[jax.Array, float],
+    swing_height: Union[jax.Array, float] = 0.08
+) -> jax.Array:
+  def cubic_bezier_interpolation(y_start, y_end, x):
+    y_diff = y_end - y_start
+    bezier = x**3 + 3 * (x**2 * (1 - x))
+    return y_start + y_diff * bezier
+
+  x = (phi + jp.pi) / (2 * jp.pi)
+  stance = cubic_bezier_interpolation(0, swing_height, 2 * x)
+  swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
+  return jp.where(x <= 0.5, stance, swing)
 
 def get_collision_info(
     contact: Any, geom1: int, geom2: int
@@ -40,6 +53,23 @@ def get_collision_info(
 def geoms_colliding(state: mjx.Data, geom1: int, geom2: int) -> jax.Array:
   """Return True if the two geoms are colliding."""
   return get_collision_info(state.contact, geom1, geom2)[0] < 0
+
+def get_collision_info_np(
+    contact: Any, geom1: int, geom2: int
+) -> Tuple[np.ndarray, np.ndarray]:
+  """Get the distance and normal of the collision between two geoms."""
+  mask = (np.array([geom1, geom2]) == contact.geom).all(axis=1)
+  mask |= (np.array([geom2, geom1]) == contact.geom).all(axis=1)
+  idx = np.where(mask, contact.dist, 1e4).argmin()
+  dist = contact.dist[idx] * mask[idx]
+  print(contact.frame[idx, 0, :3])
+  normal = (dist < 0) * contact.frame[idx, 0, :3]
+  return dist, normal
+
+def geoms_colliding_np(state,
+                       geom1: int, geom2: int) -> bool:
+  """Return True if the two geoms are colliding."""
+  return get_collision_info_np(state.contact, geom1, geom2)[0] < 0
 
 
 def draw_joystick_command(
