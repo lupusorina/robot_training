@@ -122,7 +122,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         self.data = mujoco.MjData(self._mj_model)
         self._mj_model.opt.timestep = self._sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
-        self.paused = False
+        self.paused = True
         print(f"Number of joints: {self._nb_joints}")
         print(f"Nb controls: {self._mj_model.nu}")
 
@@ -131,7 +131,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         self._mj_model.vis.global_.offheight = 2160
         self.visualize_mujoco = True
         if self.visualize_mujoco is True:
-            self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data)
+            self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data, key_callback=self.key_callback)
 
         # Info.
         self.info = {}
@@ -143,6 +143,10 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
             low=-np.inf, high=np.inf, shape=self.observation_size, dtype=np.float64
         )
         
+    def key_callback(self, keycode):
+        if chr(keycode) == ' ':
+            self.paused = not self.paused
+
     def _post_init(self) -> None:
         self._init_q = self._mj_model.keyframe("home").qpos
         self._default_q_joints = self._mj_model.keyframe("home").qpos[7:]
