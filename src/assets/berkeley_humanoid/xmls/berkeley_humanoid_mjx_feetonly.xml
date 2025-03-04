@@ -110,7 +110,7 @@
                 <body name="ll_faa" pos="0 0.0175 0" quat="0.5 -0.5 -0.5 -0.5">
                   <inertial pos="-2.9e-05 -0.0163978 0.0153387" quat="0.985258 -0.171058 -0.00255986 0.000455342"
                     mass="0.507" diaginertia="0.00109422 0.000978734 0.000375399"/>
-                  <joint name="LL_FAA" class="faa"/>
+                  <!-- <joint name="LL_FAA" class="faa"/> -->
                   <geom pos="-0.16 0.503096 -0.0286723" quat="0.5 -0.5 -0.5 -0.5" class="visual" mesh="ll_faa"/>
                   <geom name="l_foot1" class="foot1" quat="0.45452 -0.541675 -0.541675 -0.45452"/>
                   <geom name="l_foot2" class="foot2" quat="0 -1 -1 0"/>
@@ -156,7 +156,7 @@
                 <body name="lr_faa" pos="0 0.0175 0" quat="0.5 -0.5 -0.5 -0.5">
                   <inertial pos="2.9e-05 -0.0163368 0.0153387" quat="0.985231 -0.171209 0.00251902 -0.000808065"
                     mass="0.507" diaginertia="0.00109488 0.000978788 0.000376011"/>
-                  <joint name="LR_FAA" class="faa"/>
+                  <!-- <joint name="LR_FAA" class="faa"/> -->
                   <geom pos="0.16 0.503096 -0.0286723" quat="0.5 -0.5 -0.5 -0.5" class="visual" mesh="lr_faa"/>
                   <geom name="r_foot1" class="foot1" quat="-0.45452 0.541675 0.541675 0.45452"/>
                   <geom name="r_foot2" class="foot2" quat="0 1 1 0"/>
@@ -176,14 +176,14 @@
     <position class="hfe" name="LL_HFE" joint="LL_HFE"/>
     <position class="kfe" name="LL_KFE" joint="LL_KFE"/>
     <position class="ffe" name="LL_FFE" joint="LL_FFE"/>
-    <position class="faa" name="LL_FAA" joint="LL_FAA"/>
+    <!-- <position class="faa" name="LL_FAA" joint="LL_FAA"/> -->
 
     <position class="hxx" name="LR_HR" joint="LR_HR"/>
     <position class="hxx" name="LR_HAA" joint="LR_HAA"/>
     <position class="hfe" name="LR_HFE" joint="LR_HFE"/>
     <position class="kfe" name="LR_KFE" joint="LR_KFE"/>
     <position class="ffe" name="LR_FFE" joint="LR_FFE"/>
-    <position class="faa" name="LR_FAA" joint="LR_FAA"/>
+    <!-- <position class="faa" name="LR_FAA" joint="LR_FAA"/> -->
   </actuator>
 
   <sensor>

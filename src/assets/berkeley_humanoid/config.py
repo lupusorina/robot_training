@@ -18,9 +18,14 @@ IMU_SITE = "imu"
 HIP_JOINT_NAMES = ["HR", "HAA", "HFE"]
 KNEE_JOINT_NAMES = ["KFE"]
 ANKLE_FE_JOINT_NAMES = ["FFE"]
-ANKLE_AA_JOINT_NAMES = ["FAA"]
+# ANKLE_AA_JOINT_NAMES = ["FAA"]
+ANKLE_AA_JOINT_NAMES = []
 
 SIDES = ["LL", "LR"]
 
-COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
-                    1.0, 1.0, 0.01, 0.01, 1.0, 1.0]  # right leg.
+# COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0, 1.0,  # left leg.
+#                     1.0, 1.0, 0.01, 0.01, 1.0, 1.0]  # right leg.
+
+
+COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0,  # left leg.
+                      1.0, 1.0, 0.01, 0.01,  1.0]  # right leg.
