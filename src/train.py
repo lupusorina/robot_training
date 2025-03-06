@@ -54,12 +54,6 @@ if not os.path.exists(os.path.join(FOLDER_PLOTS, time_now)):
     os.makedirs(os.path.join(FOLDER_PLOTS, time_now))
 FOLDER_PLOTS = os.path.join(FOLDER_PLOTS, time_now)
 
-VIDEO_FOLDER = 'videos'
-if not os.path.exists(os.path.join(VIDEO_FOLDER, time_now)):
-    os.makedirs(os.path.join(VIDEO_FOLDER, time_now))
-VIDEO_FOLDER = os.path.join(VIDEO_FOLDER, time_now)
-
-
 # Brax PPO config.
 brax_ppo_config = config_dict.create(
       num_timesteps=150_000_000,
@@ -89,12 +83,7 @@ brax_ppo_config = config_dict.create(
 ppo_params = brax_ppo_config
 
 # Environment.
-env_name = 'Berkeley Biped'
-if env_name == "Berkeley Biped"
-  from biped_berkeley import Biped
-elif env_name == "Biped"
-  from biped import Biped
-print(f"Starting training for {env_name}")
+from biped_berkeley import Biped
 env = Biped()
 
 x_data, y_data, y_dataerr = [], [], []
@@ -112,6 +101,7 @@ def progress(num_steps, metrics):
   plt.xlabel("# environment steps")
   plt.ylabel("reward per episode")
   plt.title(f"y={y_data[-1]:.3f}")
+  print("Reward", y_data[-1])
   plt.errorbar(x_data, y_data, yerr=y_dataerr, color="blue")
   plt.savefig(f'{FOLDER_PLOTS}/reward.png')
   # display(plt.gcf())
