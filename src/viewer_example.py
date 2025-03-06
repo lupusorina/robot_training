@@ -1,4 +1,5 @@
 """An example integration of MJX with the MuJoCo viewer."""
+""" to run: >> mjpython viewer_example.py """
 
 import logging
 import time
@@ -80,8 +81,6 @@ def _main(argv: Sequence[str]) -> None:
 
             if _VIEWER_GLOBAL_STATE['running']:
                 dx = step_fn(mx, dx)
-                
-            print('qpos', dx.qpos)
 
             mjx.get_data_into(d, m, dx)
             viewer.sync()
@@ -90,10 +89,8 @@ def _main(argv: Sequence[str]) -> None:
             if elapsed < m.opt.timestep:
                 time.sleep(m.opt.timestep - elapsed)
 
-
 def main():
   app.run(_main)
-
 
 if __name__ == '__main__':
   main()
