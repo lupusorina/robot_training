@@ -19,6 +19,28 @@ import utils
 from utils import geoms_colliding
 import tqdm
 
+NAME_ROBOT = 'berkeley_humanoid'
+if NAME_ROBOT == 'berkeley_humanoid':
+    import assets.berkeley_humanoid.config as robot_config
+if NAME_ROBOT == 'biped':
+    import assets.biped.config as robot_config
+    # raise NotImplementedError
+
+print('NAME_ROBOT:', NAME_ROBOT)
+
+XML_PATH = robot_config.XML_PATH
+ROOT_BODY = robot_config.ROOT_BODY
+FEET_SITES = robot_config.FEET_SITES
+FEET_GEOMS = robot_config.FEET_GEOMS
+GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
+GLOBAL_LINVEL_SENSOR = robot_config.GLOBAL_LINVEL_SENSOR
+GLOBAL_ANGVEL_SENSOR = robot_config.GLOBAL_ANGVEL_SENSOR
+LOCAL_LINVEL_SENSOR = robot_config.LOCAL_LINVEL_SENSOR
+ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
+GYRO_SENSOR = robot_config.GYRO_SENSOR
+IMU_SITE = robot_config.IMU_SITE
+HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
+
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
@@ -85,27 +107,6 @@ def default_config() -> config_dict.ConfigDict:
       lin_vel_y=[-1.0, 1.0],
       ang_vel_yaw=[-1.0, 1.0],
   )
-
-
-NAME_ROBOT = 'biped'
-if NAME_ROBOT == 'berkeley_humanoid':
-    import assets.berkeley_humanoid.config as robot_config
-if NAME_ROBOT == 'biped':
-    import assets.biped.config as robot_config
-    # raise NotImplementedError
-
-XML_PATH = robot_config.XML_PATH
-ROOT_BODY = robot_config.ROOT_BODY
-FEET_SITES = robot_config.FEET_SITES
-FEET_GEOMS = robot_config.FEET_GEOMS
-GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
-GLOBAL_LINVEL_SENSOR = robot_config.GLOBAL_LINVEL_SENSOR
-GLOBAL_ANGVEL_SENSOR = robot_config.GLOBAL_ANGVEL_SENSOR
-LOCAL_LINVEL_SENSOR = robot_config.LOCAL_LINVEL_SENSOR
-ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
-GYRO_SENSOR = robot_config.GYRO_SENSOR
-IMU_SITE = robot_config.IMU_SITE
-HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 class Biped():
   """Track a joystick command."""
