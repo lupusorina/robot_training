@@ -1,6 +1,6 @@
 <mujoco model="biped">
   <compiler angle="radian" meshdir="meshes" autolimits="true"/>
-  <option iterations="3" ls_iterations="5" timestep="0.002" integrator="Euler">
+  <option iterations="3" ls_iterations="5" timestep="0.001" integrator="Euler">
     <flag eulerdamp="disable"/>
   </option>
 
