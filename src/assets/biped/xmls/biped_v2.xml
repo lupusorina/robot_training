@@ -51,11 +51,10 @@
     <body name="base_link" pos="0.0 0.0 1.0">
     <camera name="front" pos="1.210 -0.435 0.32" xyaxes="0.342 0.940 0.000 -0.321 0.117 0.940" mode="trackcom"/>
     <camera name="track" pos="0.805 -1.105 0.2" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971" mode="trackcom"/>
-
       <inertial pos="-0.022 0 0.068" quat="1. 0. 0. 0." mass="3.272" diaginertia="0.018 0.030 0.026" />
       <geom name="base_link" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="base_link"/>
       <joint armature="0" damping="0" limited="false" name="root" pos="0 0 0" stiffness="0" type="free"/>
-      <site name="imu_location" pos="0 0 0" euler="-3.141592 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
+      <site name="imu_location" pos="0 0 0" euler="0 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
 
       <body name="L_HIP" pos="0 0.07 -0.005">
         <inertial pos="-0.0542 0 -0.072" mass="0.624" diaginertia="0.0018 0.001 0.001"/>
@@ -74,7 +73,7 @@
             
             <body name="L_LOWER_LEG" pos="0 0.0589 -0.23405">
               <inertial pos="-1.356e-05 -0.017 -0.15" mass="0.118" diaginertia="0.001 0.001 1e-05"/>
-              <joint name="L_KFE" pos="0 0 0" axis="0 1 0" limited="true" range="-2.2 -0.1"/>
+              <joint name="L_KFE" pos="0 0 0" axis="0 1 0" limited="true" range="-2.2 2.2"/>
               <geom name="L_LOWER_LEG" type="mesh" contype="0" conaffinity="0" rgba="0.792157 0.819608 0.933333 1" mesh="L_LOWER_LEG"/>
               
               <body name="L_FOOT" pos="0.0019 -0.0173 -0.30326">
@@ -107,7 +106,7 @@
             
             <body name="R_LOWER_LEG" pos="0 -0.0584 -0.23405">
               <inertial pos="0 0.017 -0.15" quat="1. 0. 0. 0." mass="0.118" diaginertia="0.001 0.001 1e-05"/>
-              <joint name="R_KFE" pos="0 0 0" axis="0 1 0" limited="true" range="-2.2 -0.1"/>
+              <joint name="R_KFE" pos="0 0 0" axis="0 1 0" limited="true" range="-2.2 2.2"/>
               <geom name="R_LOWER_LEG" type="mesh" contype="0" conaffinity="0" rgba="0.792157 0.819608 0.933333 1" mesh="R_LOWER_LEG"/>
               
               <body name="R_FOOT" pos="0.0019 0.0173 -0.30326">
