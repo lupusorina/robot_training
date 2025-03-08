@@ -5,8 +5,8 @@ XML_PATH = os.path.join(parent_dir, 'assets/biped/xmls/scene_mjx_feetonly_flat_t
 
 ROOT_BODY = "base_link"
 FEET_SITES = ["l_foot", "r_foot"]
-LEFT_FEET_GEOMS = ["L_FOOT_GEOM"]
-RIGHT_FEET_GEOMS = ["R_FOOT_GEOM"]
+LEFT_FEET_GEOMS = ["L_FOOT"]
+RIGHT_FEET_GEOMS = ["R_FOOT"]
 FEET_GEOMS = LEFT_FEET_GEOMS + RIGHT_FEET_GEOMS
 GRAVITY_SENSOR = "upvector"
 GLOBAL_LINVEL_SENSOR = "global_linvel"
