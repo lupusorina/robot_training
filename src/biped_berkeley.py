@@ -1,6 +1,7 @@
 """
-  Joystick task for Berkeley Humanoid.
-  Modified by Sorina Lupu (eslupu@caltech.edu)
+  Joystick task for the Caltech Biped.
+  Modified by Sorina Lupu (eslupu@caltech.edu) from the Berkeley biped code from MuJoCo playground
+  https://github.com/google-deepmind/mujoco_playground/
 """
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
