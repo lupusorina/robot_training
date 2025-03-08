@@ -14,18 +14,16 @@ from mujoco import mjx
 from mujoco.mjx._src import math
 
 import numpy as np
-import os
 
 import utils
 from utils import geoms_colliding
 import tqdm
 
-NAME_ROBOT = 'berkeley_humanoid'
+NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'berkeley_humanoid':
     import assets.berkeley_humanoid.config as robot_config
 if NAME_ROBOT == 'biped':
     import assets.biped.config as robot_config
-    # raise NotImplementedError
 
 print('NAME_ROBOT:', NAME_ROBOT)
 
@@ -41,7 +39,7 @@ ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
 GYRO_SENSOR = robot_config.GYRO_SENSOR
 IMU_SITE = robot_config.IMU_SITE
 HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
-
+DESIRED_HEIGHT = robot_config.DESIRED_HEIGHT
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
@@ -96,7 +94,7 @@ def default_config() -> config_dict.ConfigDict:
               pose=-1.0,
           ),
           tracking_sigma=0.5,
-          max_foot_height=0.1,
+          max_foot_height=0.15,
           base_height_target=0.5,
       ),
       push_config=config_dict.create(
