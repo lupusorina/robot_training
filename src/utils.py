@@ -7,7 +7,7 @@ import numpy as np
 from mujoco import mjx
 from flax import struct
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 
 def get_rz(
