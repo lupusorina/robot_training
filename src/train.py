@@ -42,17 +42,14 @@ from wrapper import wrap_for_brax_training
 
 # Folders.
 FOLDER_RESULTS = 'results'
+if not os.path.exists(FOLDER_RESULTS):
+    os.makedirs(FOLDER_RESULTS)
 time_now = datetime.now().strftime('%Y%m%d-%H%M%S')
 if not os.path.exists(os.path.join(FOLDER_RESULTS, time_now)):
     os.makedirs(os.path.join(FOLDER_RESULTS, time_now))
 FOLDER_RESULTS = os.path.join(FOLDER_RESULTS, time_now)
 ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
-
-FOLDER_PLOTS = 'plots'
-if not os.path.exists(os.path.join(FOLDER_PLOTS, time_now)):
-    os.makedirs(os.path.join(FOLDER_PLOTS, time_now))
-FOLDER_PLOTS = os.path.join(FOLDER_PLOTS, time_now)
 
 # Brax PPO config.
 brax_ppo_config = config_dict.create(
@@ -101,9 +98,9 @@ def progress(num_steps, metrics):
   plt.xlabel("# environment steps")
   plt.ylabel("reward per episode")
   plt.title(f"y={y_data[-1]:.3f}")
-  print("Reward", y_data[-1])
+  print("Reward for {} steps: {:.3f}".format(num_steps, y_data[-1]))
   plt.errorbar(x_data, y_data, yerr=y_dataerr, color="blue")
-  plt.savefig(f'{FOLDER_PLOTS}/reward.png')
+  plt.savefig(f'{ABS_FOLDER_RESUlTS}/reward.png')
   # display(plt.gcf())
   
 ppo_training_params = dict(ppo_params)
