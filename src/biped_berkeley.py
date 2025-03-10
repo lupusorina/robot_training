@@ -100,11 +100,11 @@ def default_config() -> config_dict.ConfigDict:
       push_config=config_dict.create(
           enable=True,
           interval_range=[5.0, 10.0],
-          magnitude_range=[0.1, 2.0],
+          magnitude_range=[0.05, 0.1],
       ),
-      lin_vel_x=[-1.0, 1.0],
-      lin_vel_y=[-1.0, 1.0],
-      ang_vel_yaw=[-1.0, 1.0],
+      lin_vel_x=[-0.1, 0.1],
+      lin_vel_y=[-0.1, 0.1],
+      ang_vel_yaw=[-0.1, 0.1],
   )
 
 class Biped():
@@ -121,6 +121,7 @@ class Biped():
 
     self.ctrl_dt = config.ctrl_dt
     self._sim_dt = config.sim_dt
+    self.dt = self._sim_dt
     
     self._mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
 
@@ -128,12 +129,13 @@ class Biped():
 
     self._mj_model.vis.global_.offwidth = 3840
     self._mj_model.vis.global_.offheight = 2160
-    
+
     self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
+    self.action_space = jp.zeros(self.action_size)
     print(f"Number of joints: {self._nb_joints}")
 
     self._mjx_model = mjx.put_model(self._mj_model) # MJX model.
-    
+
     self._post_init()
 
   def _post_init(self) -> None:
@@ -145,6 +147,8 @@ class Biped():
     r = q_j_max - q_j_min
     self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
     self._soft_q_j_max = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
+    self.lower_limit_ctrl = np.array(self._soft_q_j_min)
+    self.upper_limit_ctrl = np.array(self._soft_q_j_max)
 
     q_j_noise_scale = np.zeros(self._nb_joints) # For joint noise.
 
