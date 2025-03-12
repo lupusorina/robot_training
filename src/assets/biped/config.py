@@ -23,7 +23,9 @@ ANKLE_FE_JOINT_NAMES = ["ANKLE"]
 # ANKLE_FE_JOINT_NAMES = []
 ANKLE_AA_JOINT_NAMES = []
 
+CONTROLLED_JOINTS = HIP_JOINT_NAMES + KNEE_JOINT_NAMES
+
 SIDES = ["L", "R"]
 
-COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0,  # left leg.
-                    1.0, 1.0, 0.01, 0.01,  1.0]  # right leg.
+COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 0.001,  # left leg.
+                     1.0, 1.0, 0.01, 0.01, 0.001]  # right leg.

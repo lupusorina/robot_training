@@ -22,10 +22,11 @@ import tqdm
 NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'berkeley_humanoid':
     import assets.berkeley_humanoid.config as robot_config
+    raise NotImplementedError
 if NAME_ROBOT == 'biped':
     import assets.biped.config as robot_config
 
-print('NAME_ROBOT:', NAME_ROBOT)
+print('Name Robot:', NAME_ROBOT)
 
 XML_PATH = robot_config.XML_PATH
 ROOT_BODY = robot_config.ROOT_BODY
@@ -40,6 +41,7 @@ GYRO_SENSOR = robot_config.GYRO_SENSOR
 IMU_SITE = robot_config.IMU_SITE
 HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 DESIRED_HEIGHT = robot_config.DESIRED_HEIGHT
+CONTROLLED_JOINTS = robot_config.CONTROLLED_JOINTS
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
@@ -150,6 +152,9 @@ class Biped():
     self.lower_limit_ctrl = np.array(self._soft_q_j_min)
     self.upper_limit_ctrl = np.array(self._soft_q_j_max)
 
+    self.ctrl_range = np.zeros((self._nb_joints, 2))
+    self.ctrl_range[:, 0] = self.lower_limit_ctrl
+    self.ctrl_range[:, 1] = self.upper_limit_ctrl
     q_j_noise_scale = np.zeros(self._nb_joints) # For joint noise.
 
     hip_indices = []
@@ -260,8 +265,8 @@ class Biped():
         "rng": rng,
         "step": 0,
         "command": cmd,
-        "last_act": jp.zeros(self._mjx_model.nu),
-        "last_last_act": jp.zeros(self._mjx_model.nu),
+        "last_act": jp.zeros(self.action_size),
+        "last_last_act": jp.zeros(self.action_size),
         "motor_targets": jp.zeros(self._mjx_model.nu),
         "feet_air_time": jp.zeros(2),
         "last_contact": jp.zeros(2, dtype=bool),
@@ -306,8 +311,22 @@ class Biped():
     qvel = qvel.at[:2].set(push * push_magnitude + qvel[:2])
     data = state.data.replace(qvel=qvel)
     state = state.replace(data=data)
+    
+    # TODO: figure out how to write this less hardcoded.
+    # NOTE: this works only for the biped.
+    actions_policy = jp.zeros(self._nb_joints)
+    actions_policy.at[0].set(action[0]) # L_YAW
+    actions_policy.at[1].set(action[1]) # L_HAA
+    actions_policy.at[2].set(action[2]) # L_HFE
+    actions_policy.at[3].set(action[3]) # L_KFE
+    actions_policy.at[4].set(0.0) # L_ANKLE
+    actions_policy.at[5].set(action[4]) # R_YAW
+    actions_policy.at[6].set(action[5]) # R_HAA
+    actions_policy.at[7].set(action[6]) # R_HFE
+    actions_policy.at[8].set(action[7]) # R_KFE
+    actions_policy.at[9].set(0.0) # R_ANKLE
 
-    motor_targets = self._default_q_joints + action * self._config.action_scale
+    motor_targets = self._default_q_joints + actions_policy * self._config.action_scale
     data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
     state.info["motor_targets"] = motor_targets
 
@@ -438,9 +457,9 @@ class Biped():
         noisy_gyro,  # 3
         noisy_gravity,  # 3
         info["command"],  # 3
-        noisy_joint_angles - self._default_q_joints,  # 12
-        noisy_joint_vel,  # 12
-        info["last_act"],  # 12
+        noisy_joint_angles - self._default_q_joints,  # 10
+        noisy_joint_vel,  # 10
+        info["last_act"],  # 10
         phase,
     ])
 
@@ -687,7 +706,7 @@ class Biped():
 
   @property
   def action_size(self) -> int:
-    return self._nb_joints
+    return self._nb_joints - 2 # the ankles are not actuated
   
   def render(
       self,

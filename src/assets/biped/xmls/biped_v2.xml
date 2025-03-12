@@ -162,13 +162,13 @@
       <position name="L_HAA" joint="L_HAA" kp="38.1" kv="3.18"/>
       <position name="L_HFE" joint="L_HFE" kp="38.1" kv="3.18"/>
       <position name="L_KFE" joint="L_KFE" kp="38.1" kv="0.95"/>
-      <position name="L_ANKLE" joint="L_ANKLE" kp="0.1" kv="0.005"/>
+      <position name="L_ANKLE" joint="L_ANKLE" kp="0.005" kv="0.005"/>
 
       <position name="R_YAW" joint="R_YAW" kp="38.1" kv="0.5"/>
       <position name="R_HAA" joint="R_HAA" kp="38.1" kv="3.18"/>
       <position name="R_HFE" joint="R_HFE" kp="38.1" kv="3.18"/>
       <position name="R_KFE" joint="R_KFE" kp="38.1" kv="0.95"/>
-      <position name="R_ANKLE" joint="R_ANKLE" kp="0.1" kv="0.005"/>
+      <position name="R_ANKLE" joint="R_ANKLE" kp="0.005" kv="0.005"/>
     </actuator>
 
 </mujoco>
