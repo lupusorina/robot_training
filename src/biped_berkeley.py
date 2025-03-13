@@ -319,12 +319,12 @@ class Biped():
     actions_policy.at[1].set(action[1]) # L_HAA
     actions_policy.at[2].set(action[2]) # L_HFE
     actions_policy.at[3].set(action[3]) # L_KFE
-    actions_policy.at[4].set(0.0) # L_ANKLE
-    actions_policy.at[5].set(action[4]) # R_YAW
-    actions_policy.at[6].set(action[5]) # R_HAA
-    actions_policy.at[7].set(action[6]) # R_HFE
-    actions_policy.at[8].set(action[7]) # R_KFE
-    actions_policy.at[9].set(0.0) # R_ANKLE
+    actions_policy.at[4].set(action[4]) # L_ANKLE
+    actions_policy.at[5].set(action[5]) # R_YAW
+    actions_policy.at[6].set(action[6]) # R_HAA
+    actions_policy.at[7].set(action[7]) # R_HFE
+    actions_policy.at[8].set(action[8]) # R_KFE
+    actions_policy.at[9].set(action[9]) # R_ANKLE
 
     motor_targets = self._default_q_joints + actions_policy * self._config.action_scale
     data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
@@ -706,7 +706,7 @@ class Biped():
 
   @property
   def action_size(self) -> int:
-    return self._nb_joints - 2 # the ankles are not actuated
+    return self._nb_joints # the ankles are not actuated
   
   def render(
       self,
