@@ -94,13 +94,13 @@ def default_config() -> config_dict.ConfigDict:
               pose=-1.0,
           ),
           tracking_sigma=0.5,
-          max_foot_height=0.15,
-          base_height_target=0.5,
+          max_foot_height=0.1,
+          base_height_target=DESIRED_HEIGHT,
       ),
       push_config=config_dict.create(
           enable=True,
           interval_range=[5.0, 10.0],
-          magnitude_range=[0.05, 0.1],
+          magnitude_range=[0.05, 0.4],
       ),
       lin_vel_x=[-0.1, 0.1],
       lin_vel_y=[-0.1, 0.1],
@@ -260,8 +260,8 @@ class Biped():
         "rng": rng,
         "step": 0,
         "command": cmd,
-        "last_act": jp.zeros(self._mjx_model.nu),
-        "last_last_act": jp.zeros(self._mjx_model.nu),
+        "last_act": jp.zeros(self.action_size),
+        "last_last_act": jp.zeros(self.action_size),
         "motor_targets": jp.zeros(self._mjx_model.nu),
         "feet_air_time": jp.zeros(2),
         "last_contact": jp.zeros(2, dtype=bool),
@@ -307,7 +307,21 @@ class Biped():
     data = state.data.replace(qvel=qvel)
     state = state.replace(data=data)
 
-    motor_targets = self._default_q_joints + action * self._config.action_scale
+    # TODO: figure out how to write this less hardcoded.
+    # NOTE: this works only for the biped.
+    # actions_policy = jp.zeros(self._nb_joints)
+    # actions_policy = actions_policy.at[0].set(action[0]) # L_YAW
+    # actions_policy = actions_policy.at[1].set(action[1]) # L_HAA
+    # actions_policy = actions_policy.at[2].set(action[2]) # L_HFE
+    # actions_policy = actions_policy.at[3].set(action[3]) # L_KFE
+    # actions_policy = actions_policy.at[4].set(action[4]) # L_ANKLE
+    # actions_policy = actions_policy.at[5].set(action[5]) # R_YAW
+    # actions_policy = actions_policy.at[6].set(action[6]) # R_HAA
+    # actions_policy = actions_policy.at[7].set(action[7]) # R_HFE
+    # actions_policy = actions_policy.at[8].set(action[8]) # R_KFE
+    # actions_policy = actions_policy.at[9].set(action[9]) # R_ANKLE
+
+    motor_targets = self._default_q_joints + actions * self._config.action_scale
     data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
     state.info["motor_targets"] = motor_targets
 
@@ -550,6 +564,7 @@ class Biped():
     return jp.sum(jp.square(torso_zaxis[:2]))
 
   def _cost_base_height(self, base_height: jax.Array) -> jax.Array:
+    # jax.debug.print(" {x}", x=base_height)
     return jp.square(base_height - self._config.reward_config.base_height_target)
 
   # Energy related rewards.
