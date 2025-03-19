@@ -45,6 +45,8 @@ class CartPoleJax(PipelineEnv):
         n_frames = kwargs.pop('n_frames', int(self.step_dt / sys.opt.timestep))
         self.observation_space = 4
         self.action_space = 1
+        self.ctrl_range = jnp.array([[-3.0, 3.0]])
+        self.state = None
         super().__init__(sys, backend=backend, n_frames=n_frames)
 
     def reset(self, rng: jax.Array) -> State:
@@ -100,9 +102,15 @@ class CartPoleJax(PipelineEnv):
         # Observation: [x, th, dx, dth]
         return jnp.concatenate([pipeline_state.q, pipeline_state.qd])
 
+    @property
+    def observation_size(self):
+        return {
+            "state": (self.observation_space, ),
+            "privileged_state": (self.observation_space,), # TODO: make privilaged information
+        }
+
 
 # Environment without JAX.
-
 import mujoco as mj
 import mujoco.viewer
 
@@ -113,6 +121,8 @@ class CartPole():
         self.visualize_mujoco = visualize_mujoco
         self.model = mj.MjModel.from_xml_string(XML_MODEL)
         self.data = mj.MjData(self.model)
+        self.observation_space = 4
+        self.action_space = 1
         if self.visualize_mujoco is True:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
 
@@ -128,7 +138,7 @@ class CartPole():
         if self.visualize_mujoco is True:
             if self.viewer.is_running():
                 self.viewer.sync()
-        return self._get_observation(), self._get_reward(), self._get_done(), {}
+        return self._get_observation(), self._get_reward(), self._get_done(), self._get_done(), {}
 
     def _get_observation(self):
         return np.concatenate([self.data.qpos, self.data.qvel])
@@ -139,13 +149,30 @@ class CartPole():
     def _get_done(self):
         return np.abs(self.data.qpos[0]) > 1.0 or np.abs(self.data.qpos[1]) > np.pi / 2
 
+from ppo import Agent
+import torch
+
 def main():
-    env = CartPole()
-    obs = env.reset()
+    env = CartPole(visualize_mujoco=True)
+    observation = env.reset()
+
+    # Folder to load the policy from
+    policy_layers = [
+      env.observation_space, 64, 64, env.action_space * 2
+    ]
+    value_layers = [env.observation_space, 64, 64, 1]
+    agent = Agent(policy_layers, value_layers,
+                  entropy_cost=1, discounting=1, # unused
+                    reward_scaling=1, device='cpu') # unused
+    agent.policy.load_state_dict(torch.load('logs/results/ppo_model_pytorch.pth'))
 
     for i in range(200):
-        action = np.random.uniform(-3, 3)
-        obs, _, _, _ = env.step(action)
+        obs_torch = torch.tensor(observation, dtype=torch.float32)
+        logits, action = agent.get_logits_action(obs_torch)
+        action = Agent.dist_postprocess(action)
+        agent_np = action.detach().numpy()
+        observation, reward, done, _, info = env.step(agent_np)
+
 
 if __name__ == '__main__':
     main()
