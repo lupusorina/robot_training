@@ -41,14 +41,15 @@ from ml_collections import config_dict
 from wrapper import wrap_for_brax_training
 
 # Folders.
-FOLDER_RESULTS = 'results'
-if not os.path.exists(FOLDER_RESULTS):
-    os.makedirs(FOLDER_RESULTS)
+RESULTS = 'results'
+if not os.path.exists(RESULTS):
+    os.makedirs(RESULTS)
 time_now = datetime.now().strftime('%Y%m%d-%H%M%S')
-if not os.path.exists(os.path.join(FOLDER_RESULTS, time_now)):
-    os.makedirs(os.path.join(FOLDER_RESULTS, time_now))
-FOLDER_RESULTS = os.path.join(FOLDER_RESULTS, time_now)
+if not os.path.exists(os.path.join(RESULTS, time_now)):
+    os.makedirs(os.path.join(RESULTS, time_now))
+FOLDER_RESULTS = os.path.join(RESULTS, time_now)
 ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
+FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
 # Brax PPO config.
@@ -94,13 +95,16 @@ def progress(num_steps, metrics):
   y_data.append(metrics["eval/episode_reward"])
   y_dataerr.append(metrics["eval/episode_reward_std"])
 
-  plt.xlim([0, ppo_params["num_timesteps"] * 1.25])
-  plt.xlabel("# environment steps")
-  plt.ylabel("reward per episode")
-  plt.title(f"y={y_data[-1]:.3f}")
-  print("Reward for {} steps: {:.3f}".format(num_steps, y_data[-1]))
-  plt.errorbar(x_data, y_data, yerr=y_dataerr, color="blue")
+  fig, ax = plt.subplots()
+  ax.set_xlim([0, ppo_params["num_timesteps"] * 1.25])
+  ax.set_xlabel("# environment steps")
+  ax.set_ylabel("reward per episode")
+  ax.set_title(f"y={y_data[-1]:.3f}")
+  ax.plot(x_data, y_data)
+  ax.fill_between(x_data, np.array(y_data) - np.array(y_dataerr), np.array(y_data) + np.array(y_dataerr), alpha=0.2)
+  plt.savefig(f'{ABS_FOLDER_RESUlTS}/reward.pdf')
   plt.savefig(f'{ABS_FOLDER_RESUlTS}/reward.png')
+  print("Reward for {} steps: {:.3f}".format(num_steps, y_data[-1]))
   # display(plt.gcf())
   
 ppo_training_params = dict(ppo_params)
@@ -117,6 +121,7 @@ train_fn = functools.partial(
     network_factory=network_factory,
     progress_fn=progress,
     save_checkpoint_path=ABS_FOLDER_RESUlTS,
+    restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
 )
 
 make_inference_fn, params, metrics = train_fn(
