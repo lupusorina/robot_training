@@ -26,6 +26,7 @@ if not os.path.exists(NVIDIA_ICD_CONFIG_PATH):
 xla_flags = os.environ.get('XLA_FLAGS', '')
 xla_flags += ' --xla_gpu_triton_gemm_any=True'
 os.environ['XLA_FLAGS'] = xla_flags
+os.environ['JAX_CHECK_TRACER_LEAKS'] = '1'
 
 import numpy as np
 np.set_printoptions(precision=3, suppress=True, linewidth=100)
@@ -116,12 +117,14 @@ if "network_factory" in ppo_params:
       **ppo_params.network_factory
   )
 
+from randomize import domain_randomize
 train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),
     network_factory=network_factory,
     progress_fn=progress,
+    randomization_fn=domain_randomize,
     save_checkpoint_path=ABS_FOLDER_RESUlTS,
-    restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
+    # restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
 )
 
 make_inference_fn, params, metrics = train_fn(
