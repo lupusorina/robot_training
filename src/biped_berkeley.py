@@ -18,6 +18,7 @@ import numpy as np
 import utils
 from utils import geoms_colliding
 import tqdm
+import mjx_env
 
 NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'berkeley_humanoid':
@@ -121,7 +122,6 @@ class Biped():
 
     self.ctrl_dt = config.ctrl_dt
     self._sim_dt = config.sim_dt
-    self.dt = self._sim_dt
     
     self._mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
 
@@ -321,7 +321,7 @@ class Biped():
     # actions_policy = actions_policy.at[8].set(action[8]) # R_KFE
     # actions_policy = actions_policy.at[9].set(action[9]) # R_ANKLE
 
-    motor_targets = self._default_q_joints + actions * self._config.action_scale
+    motor_targets = self._default_q_joints + action * self._config.action_scale
     data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
     state.info["motor_targets"] = motor_targets
 
