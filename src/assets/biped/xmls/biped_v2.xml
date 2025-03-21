@@ -79,7 +79,7 @@
               
               <body name="L_FOOT" pos="0.0019 -0.0173 -0.30326">
                 <inertial pos="-0.00185 -4.9998e-05 -0.0083528" quat="0.710914 0 0.703279 0" mass="0.03134" diaginertia="3.39896e-05 3.35525e-05 1.53506e-06"/>
-                <joint name="L_ANKLE" pos="0 0 0" axis="0 1 0" limited="true" range="-0.7 0.7"/>
+                <joint name="L_ANKLE" pos="0 0 0" axis="0 1 0" limited="true" range="-1.6 1.6"/>
                 <geom name="L_FOOT" friction="1. 0.3 0.3" size="0.015 0.05" pos="0 0 -0.01" quat="0.710914 0 0.703279 0"  type="capsule" rgba="0.8 0.8 0.8 1"/>
                 <site name="l_foot" quat="0.710914 0 0.703279 0"/>
 
@@ -112,7 +112,7 @@
               
               <body name="R_FOOT" pos="0.0019 0.0173 -0.30326">
                 <inertial pos="-0.00185 4.9998e-05 -0.0083528" quat="0.710914 0 0.703279 0" mass="0.03134" diaginertia="3.39896e-05 3.35525e-05 1.53506e-06"/>
-                <joint name="R_ANKLE" pos="0 0 0" axis="0 1 0" limited="true" range="-0.7 0.7"/>
+                <joint name="R_ANKLE" pos="0 0 0" axis="0 1 0" limited="true" range="-1.6 1.6"/>
                 <geom name="R_FOOT" friction="1. 0.3 0.3" size="0.015 0.05" pos="0 0 -0.01" quat="0.710914 0 0.703279 0"  type="capsule" rgba="0.8 0.8 0.8 1"/>
                 <site name="r_foot" quat="0.710914 0 0.703279 0"/>
 
