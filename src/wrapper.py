@@ -93,6 +93,7 @@ def wrap_for_brax_training(
   if randomization_fn is None:
     env = brax_training.VmapWrapper(env)  # pytype: disable=wrong-arg-types
   else:
+    print("randomization_fn is not None")
     env = BraxDomainRandomizationVmapWrapper(env, randomization_fn)
   env = brax_training.EpisodeWrapper(env, episode_length, action_repeat)
   env = BraxAutoResetWrapper(env)
@@ -135,11 +136,11 @@ class BraxDomainRandomizationVmapWrapper(Wrapper):
       randomization_fn: Callable[[mjx.Model], Tuple[mjx.Model, mjx.Model]],
   ):
     super().__init__(env)
-    self._mjx_model_v, self._in_axes = randomization_fn(self.mjx_model)
+    self._mjx_model_v, self._in_axes = randomization_fn(self._mjx_model)
 
   def _env_fn(self, mjx_model: mjx.Model) -> mjx_env.MjxEnv:
     env = self.env
-    env.unwrapped._mjx_model = mjx_model
+    env._mjx_model = mjx_model
     return env
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
