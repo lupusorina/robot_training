@@ -52,7 +52,7 @@ train_fn = {
   'ant': functools.partial(ppo.train,
                            num_timesteps=50_000_000,
                            num_evals=10,
-                           reward_scaling=1,
+                           reward_scaling=10,
                            episode_length=1000,
                            normalize_observations=True,
                            action_repeat=1,
