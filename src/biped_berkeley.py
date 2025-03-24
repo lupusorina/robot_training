@@ -452,9 +452,9 @@ class Biped():
         noisy_gyro,  # 3
         noisy_gravity,  # 3
         info["command"],  # 3
-        noisy_joint_angles - self._default_q_joints,  # 12
-        noisy_joint_vel,  # 12
-        info["last_act"],  # 12
+        noisy_joint_angles - self._default_q_joints,  # 10
+        noisy_joint_vel,  # 10
+        info["last_act"],  # 10
         phase,
     ])
 
@@ -473,7 +473,7 @@ class Biped():
         joint_angles - self._default_q_joints,
         joint_vel,
         root_height,  # 1
-        data.actuator_force,  # 12
+        data.actuator_force,  # 10
         contact,  # 2
         feet_vel,  # 4*3
         info["feet_air_time"],  # 2
