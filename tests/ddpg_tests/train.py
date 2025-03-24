@@ -47,34 +47,34 @@ def progress(num_steps, metrics, agent_name):
     plt.savefig(f'{ABS_FOLDER_RESUlTS}/{agent_name}.png')
 
 # Train PPO.
-# AGENT = "PPO"
-# train_fn = {
-#   'ant': functools.partial(ppo.train,
-#                            num_timesteps=50_000_000,
-#                            num_evals=10,
-#                            reward_scaling=10,
-#                            episode_length=1000,
-#                            normalize_observations=True,
-#                            action_repeat=1,
-#                            unroll_length=5,
-#                            num_minibatches=32,
-#                            num_updates_per_batch=4,
-#                            discounting=0.97,
-#                            learning_rate=3e-4,
-#                            entropy_cost=1e-2,
-#                            num_envs=4096,
-#                            batch_size=2048,
-#                            seed=1),
-# }[env_name]
+AGENT = "PPO"
+train_fn = {
+  'ant': functools.partial(ppo.train,
+                           num_timesteps=50_000_000,
+                           num_evals=10,
+                           reward_scaling=1,
+                           episode_length=1000,
+                           normalize_observations=True,
+                           action_repeat=1,
+                           unroll_length=5,
+                           num_minibatches=32,
+                           num_updates_per_batch=4,
+                           discounting=0.97,
+                           learning_rate=3e-4,
+                           entropy_cost=1e-2,
+                           num_envs=4096,
+                           batch_size=2048,
+                           seed=1),
+}[env_name]
 
-# xdata, ydata = [], []
-# times = [datetime.now()]
+xdata, ydata = [], []
+times = [datetime.now()]
 
-# make_inference_fn, params, _ = train_fn(environment=env,
-#                                         progress_fn=functools.partial(progress, agent_name=AGENT))
+make_inference_fn, params, _ = train_fn(environment=env,
+                                        progress_fn=functools.partial(progress, agent_name=AGENT))
 
-# print(f'time to jit: {times[1] - times[0]}')
-# print(f'time to train: {times[-1] - times[1]}')
+print(f'time to jit: {times[1] - times[0]}')
+print(f'time to train: {times[-1] - times[1]}')
 
 # Train DDPG.
 AGENT = "DDPG"
