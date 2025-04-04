@@ -7,3 +7,4 @@ runs
 .DS_Store
 *.egg-info/
 logs/
+results/
