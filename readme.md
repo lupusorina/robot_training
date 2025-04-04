@@ -16,10 +16,10 @@ pip3 install -e .
 ```
 
 
-## Run biped training code
+## Run biped training code in Jax
 
 ```
-cd src/
+cd src/jax
 python3 train.py
 ```
 
@@ -28,21 +28,17 @@ Inference: test.ipynb
 ## File structure
 
 ```
-src/
-    └── biped.py                   (Biped in Jax)
-    └── biped_berkeley.py          (Berkeley Biped in Jax)
-    └── train.py                   (Train PPO on Biped)
-    └── test.ipynb                 (Jupyter notebook for testing)
-    └── mjx_env.py                 (file taken from mujoco-playground)
-    └── wrapper.py                 (file taken from mujoco-playground)
+src
+    └── jax
+        └── biped.py                   (Biped in Jax)
+        └── train.py                   (Train PPO on Biped)
+        └── test.ipynb                 (Jupyter notebook for testing)
+        └── mjx_env.py                 (file taken from mujoco-playground and modified)
+        └── wrapper.py                 (file taken from mujoco-playground and modified)
+        └── randomize.py               (domain randomization)
+        └── utils.py                   (utils)
     └── assets
-        └── berkeley_humanoid       (Berkeley Biped model)
-        └── biped                   (biped)
+        └── biped                      (biped)
 
-tests/
-    └── cart_pole.py                (Cart Pole for MuJoCo (both JAX and NP))
-    └── train_brax.py               (Train PPO on Brax) - envs in parallel
-    └── train_pytorch.py            (Train PPO on PyTorch) - envs in parallel
-    └── ppo.py                      (PPO implementation)
-    └── test_cart_pole_pytorch.py   (Test PPO on Cart Pole for PyTorch)
+tests
 ```
