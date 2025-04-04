@@ -1,7 +1,7 @@
 #@title Import Brax and some helper modules
 
 # Envs.
-from cart_pole import CartPoleJax
+from src.cart_pole import CartPoleJax
 from biped_berkeley import Biped
 
 from IPython.display import clear_output
@@ -20,7 +20,6 @@ from torch import optim
 from ppo import Agent
 
 from wrapper import VectorGymWrapper, TorchWrapper
-
 
 FIGURE_FOLDER = 'figures'
 if not os.path.exists(FIGURE_FOLDER):

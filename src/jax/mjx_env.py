@@ -15,8 +15,6 @@
 """Core classes for MuJoCo Playground."""
 
 import abc
-import subprocess
-import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from etils import epath
@@ -28,131 +26,8 @@ from mujoco import mjx
 import numpy as np
 import tqdm
 
-# Root path is used for loading XML strings directly using etils.epath.
-ROOT_PATH = epath.Path(__file__).parent
-# Base directory for external dependencies.
-EXTERNAL_DEPS_PATH = epath.Path(__file__).parent.parent / "external_deps"
-# The menagerie path is used to load robot assets.
-# Resource paths do not have glob implemented, so we use a bare epath.Path.
-MENAGERIE_PATH = EXTERNAL_DEPS_PATH / "mujoco_menagerie"
-# Commit SHA of the menagerie repo.
-MENAGERIE_COMMIT_SHA = "14ceccf557cc47240202f2354d684eca58ff8de4"
-
-
-def _clone_with_progress(
-    repo_url: str, target_path: str, commit_sha: str
-) -> None:
-  """Clone a git repo with progress bar."""
-  process = subprocess.Popen(
-      ["git", "clone", "--progress", repo_url, target_path],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
-      universal_newlines=True,
-  )
-
-  with tqdm.tqdm(
-      desc="Cloning mujoco_menagerie",
-      bar_format="{desc}: {bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
-  ) as pbar:
-    pbar.total = 100  # Set to 100 for percentage-based progress.
-    current = 0
-    while True:
-      # Read output line by line.
-      output = process.stderr.readline()  # pytype: disable=attribute-error
-      if not output and process.poll() is not None:
-        break
-      if output:
-        if "Receiving objects:" in output:
-          try:
-            percent = int(output.split("%")[0].split(":")[-1].strip())
-            if percent > current:
-              pbar.update(percent - current)
-              current = percent
-          except (ValueError, IndexError):
-            pass
-
-    # Ensure the progress bar reaches 100%.
-    if current < 100:
-      pbar.update(100 - current)
-
-  if process.returncode != 0:
-    raise subprocess.CalledProcessError(process.returncode, ["git", "clone"])
-
-  # Checkout specific commit.
-  print(f"Checking out commit {commit_sha}")
-  subprocess.run(
-      ["git", "-C", target_path, "checkout", commit_sha],
-      check=True,
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
-  )
-
-
-def ensure_menagerie_exists() -> None:
-  """Ensure mujoco_menagerie exists, downloading it if necessary."""
-  if not MENAGERIE_PATH.exists():
-    print("mujoco_menagerie not found. Downloading...")
-
-    # Create external deps directory if it doesn't exist
-    EXTERNAL_DEPS_PATH.mkdir(exist_ok=True, parents=True)
-
-    try:
-      _clone_with_progress(
-          "https://github.com/deepmind/mujoco_menagerie.git",
-          str(MENAGERIE_PATH),
-          MENAGERIE_COMMIT_SHA,
-      )
-      print("Successfully downloaded mujoco_menagerie")
-    except subprocess.CalledProcessError as e:
-      print(f"Error downloading mujoco_menagerie: {e}", file=sys.stderr)
-      raise
-
-
-# ensure_menagerie_exists()  # Ensure menagerie exists when module is imported.
-
-
 Observation = Union[jax.Array, Mapping[str, jax.Array]]
 ObservationSize = Union[int, Mapping[str, Union[Tuple[int, ...], int]]]
-
-
-def update_assets(
-    assets: Dict[str, Any],
-    path: Union[str, epath.Path],
-    glob: str = "*",
-    recursive: bool = False,
-):
-  for f in epath.Path(path).glob(glob):
-    if f.is_file():
-      assets[f.name] = f.read_bytes()
-    elif f.is_dir() and recursive:
-      update_assets(assets, f, glob, recursive)
-
-
-def init(
-    model: mjx.Model,
-    qpos: Optional[jax.Array] = None,
-    qvel: Optional[jax.Array] = None,
-    ctrl: Optional[jax.Array] = None,
-    act: Optional[jax.Array] = None,
-    mocap_pos: Optional[jax.Array] = None,
-    mocap_quat: Optional[jax.Array] = None,
-) -> mjx.Data:
-  """Initialize MJX Data."""
-  data = mjx.make_data(model)
-  if qpos is not None:
-    data = data.replace(qpos=qpos)
-  if qvel is not None:
-    data = data.replace(qvel=qvel)
-  if ctrl is not None:
-    data = data.replace(ctrl=ctrl)
-  if act is not None:
-    data = data.replace(act=act)
-  if mocap_pos is not None:
-    data = data.replace(mocap_pos=mocap_pos.reshape(model.nmocap, -1))
-  if mocap_quat is not None:
-    data = data.replace(mocap_quat=mocap_quat.reshape(model.nmocap, -1))
-  data = mjx.forward(model, data)
-  return data
 
 
 def step(
@@ -346,53 +221,3 @@ def render_array(
 
   renderer.close()
   return out
-
-
-def get_sensor_data(
-    model: mujoco.MjModel, data: mjx.Data, sensor_name: str
-) -> jax.Array:
-  """Gets sensor data given sensor name."""
-  sensor_id = model.sensor(sensor_name).id
-  sensor_adr = model.sensor_adr[sensor_id]
-  sensor_dim = model.sensor_dim[sensor_id]
-  return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
-
-
-def dof_width(joint_type: Union[int, mujoco.mjtJoint]) -> int:
-  """Get the dimensionality of the joint in qvel."""
-  if isinstance(joint_type, mujoco.mjtJoint):
-    joint_type = joint_type.value
-  return {0: 6, 1: 3, 2: 1, 3: 1}[joint_type]
-
-
-def qpos_width(joint_type: Union[int, mujoco.mjtJoint]) -> int:
-  """Get the dimensionality of the joint in qpos."""
-  if isinstance(joint_type, mujoco.mjtJoint):
-    joint_type = joint_type.value
-  return {0: 7, 1: 4, 2: 1, 3: 1}[joint_type]
-
-
-def get_qpos_ids(
-    model: mujoco.MjModel, joint_names: Sequence[str]
-) -> np.ndarray:
-  index_list: list[int] = []
-  for jnt_name in joint_names:
-    jnt = model.joint(jnt_name).id
-    jnt_type = model.jnt_type[jnt]
-    qadr = model.jnt_dofadr[jnt]
-    qdim = qpos_width(jnt_type)
-    index_list.extend(range(qadr, qadr + qdim))
-  return np.array(index_list)
-
-
-def get_qvel_ids(
-    model: mujoco.MjModel, joint_names: Sequence[str]
-) -> np.ndarray:
-  index_list: list[int] = []
-  for jnt_name in joint_names:
-    jnt = model.joint(jnt_name).id
-    jnt_type = model.jnt_type[jnt]
-    vadr = model.jnt_dofadr[jnt]
-    vdim = dof_width(jnt_type)
-    index_list.extend(range(vadr, vadr + vdim))
-  return np.array(index_list)

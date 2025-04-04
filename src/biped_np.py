@@ -14,8 +14,8 @@ import mujoco.viewer
 
 import numpy as np
 
-import utils
-from utils import geoms_colliding_np, get_rz_np
+import jax.utils as utils
+from jax.utils import geoms_colliding_np, get_rz_np
 import tqdm
 
 def default_config() -> config_dict.ConfigDict:
@@ -82,7 +82,7 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-1.0, 1.0],
   )
 
-NAME_ROBOT = 'berkeley_humanoid'
+NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'berkeley_humanoid':
     import assets.berkeley_humanoid.config as robot_config
 if NAME_ROBOT == 'biped':

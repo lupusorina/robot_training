@@ -9,7 +9,6 @@ from flax import struct
 
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
-
 def get_rz(
     phi: Union[jax.Array, float], 
     swing_height: Union[jax.Array, float] = 0.08
@@ -49,7 +48,6 @@ def get_collision_info(
   normal = (dist < 0) * contact.frame[idx, 0, :3]
   return dist, normal
 
-
 def geoms_colliding(state: mjx.Data, geom1: int, geom2: int) -> jax.Array:
   """Return True if the two geoms are colliding."""
   return get_collision_info(state.contact, geom1, geom2)[0] < 0
@@ -70,7 +68,6 @@ def geoms_colliding_np(state,
                        geom1: int, geom2: int) -> bool:
   """Return True if the two geoms are colliding."""
   return get_collision_info_np(state.contact, geom1, geom2)[0] < 0
-
 
 def draw_joystick_command(
     scn,
@@ -114,61 +111,3 @@ def draw_joystick_command(
       from_=arrow_from,
       to=arrow_to,
   )
-
-## -----------------------------------------------------------------------
-
-Observation = Union[jax.Array, Mapping[str, jax.Array]]
-ObservationSize = Union[int, Mapping[str, Union[Tuple[int, ...], int]]]
-
-@struct.dataclass
-class State:
-  """Environment state for training and inference."""
-
-  data: mjx.Data
-  obs: Observation
-  reward: jax.Array
-  done: jax.Array
-  metrics: Dict[str, jax.Array]
-  info: Dict[str, Any]
-
-  def tree_replace(
-      self, params: Dict[str, Optional[jax.typing.ArrayLike]]
-  ) -> "State":
-    new = self
-    for k, v in params.items():
-      new = _tree_replace(new, k.split("."), v)
-    return new
-
-
-def _tree_replace(
-    base: Any,
-    attr: Sequence[str],
-    val: Optional[jax.typing.ArrayLike],
-) -> Any:
-  """Sets attributes in a struct.dataclass with values."""
-  if not attr:
-    return base
-
-  # special case for List attribute
-  if len(attr) > 1 and isinstance(getattr(base, attr[0]), list):
-    raise NotImplementedError("List attributes are not supported.")
-
-  if len(attr) == 1:
-    return base.replace(**{attr[0]: val})
-
-  return base.replace(
-      **{attr[0]: _tree_replace(getattr(base, attr[0]), attr[1:], val)}
-  )
-
-def step(
-    model: mjx.Model,
-    data: mjx.Data,
-    action: jax.Array,
-    n_substeps: int = 1,
-) -> mjx.Data:
-  def single_step(data, _):
-    data = data.replace(ctrl=action)
-    data = mjx.step(model, data)
-    return data, None
-
-  return jax.lax.scan(single_step, data, (), n_substeps)[0]

@@ -4,7 +4,7 @@
   https://github.com/google-deepmind/mujoco_playground/
 """
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Union
 
 import jax
 import jax.numpy as jp
@@ -12,20 +12,19 @@ from ml_collections import config_dict
 import mujoco
 from mujoco import mjx
 from mujoco.mjx._src import math
-
 import numpy as np
 
-import utils
-from utils import geoms_colliding
-import tqdm
-import mjx_env
+# Local imports.
+import src.jax.utils as utils
+from src.jax.utils import geoms_colliding
+import src.jax.mjx_env as mjx_env
 
+# Constants.
 NAME_ROBOT = 'biped'
-if NAME_ROBOT == 'berkeley_humanoid':
-    import assets.berkeley_humanoid.config as robot_config
 if NAME_ROBOT == 'biped':
-    import assets.biped.config as robot_config
-
+  import src.assets.biped.config as robot_config
+else:
+  raise ValueError(f'NAME_ROBOT must be "biped"')
 print('NAME_ROBOT:', NAME_ROBOT)
 
 XML_PATH = robot_config.XML_PATH
@@ -108,41 +107,47 @@ def default_config() -> config_dict.ConfigDict:
       ang_vel_yaw=[-0.1, 0.1],
   )
 
-class Biped():
+class Biped(mjx_env.MjxEnv):
   """Track a joystick command."""
 
   def __init__(
       self,
+      xml_path: str = XML_PATH,
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
-    self._config = config.lock()
-    if config_overrides:
-      self._config.update_from_flattened_dict(config_overrides)
+    super().__init__(config, config_overrides)
 
+    # Initialize the model.
+    self._mj_model = mujoco.MjModel.from_xml_path(xml_path)
+
+    # Set the timesteps.
+    self._mj_model.opt.timestep = config.sim_dt
     self.ctrl_dt = config.ctrl_dt
     self._sim_dt = config.sim_dt
-    
-    self._mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
 
-    self._mj_model.opt.timestep = self._sim_dt
-
+    # Set the rendering size.
     self._mj_model.vis.global_.offwidth = 3840
     self._mj_model.vis.global_.offheight = 2160
 
-    self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
+    # Create the mjx model.
+    self._mjx_model = mjx.put_model(self._mj_model)
+    self._xml_path = xml_path
+    
+    # Initialize the action space.
+    self.nb_joints = self.mj_model.njnt - 1 # First joint is freejoint.
     self.action_space = jp.zeros(self.action_size)
-    print(f"Number of joints: {self._nb_joints}")
-
-    self._mjx_model = mjx.put_model(self._mj_model) # MJX model.
+    print(f"Number of joints: {self.nb_joints}")
 
     self._post_init()
 
   def _post_init(self) -> None:
+    # Initialize the initial state.
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
     self._default_q_joints = jp.array(self._mj_model.keyframe("home").qpos[7:])
 
-    q_j_min, q_j_max = self._mj_model.jnt_range[1:].T # Note: First joint is freejoint.
+    # Initialize the soft limits.
+    q_j_min, q_j_max = self.mj_model.jnt_range[1:].T # Note: First joint is freejoint.
     c = (q_j_min + q_j_max) / 2
     r = q_j_max - q_j_min
     self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
@@ -150,7 +155,8 @@ class Biped():
     self.lower_limit_ctrl = np.array(self._soft_q_j_min)
     self.upper_limit_ctrl = np.array(self._soft_q_j_max)
 
-    q_j_noise_scale = np.zeros(self._nb_joints) # For joint noise.
+    # Initialize the noise scale.
+    q_j_noise_scale = np.zeros(10) # For joint noise.
 
     hip_indices = []
     hip_joint_names = robot_config.HIP_JOINT_NAMES
@@ -189,8 +195,8 @@ class Biped():
         q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
     self._q_j_noise_scale = jp.array(q_j_noise_scale)
 
+    # Initialize the site and geom ids.
     self._imu_site_id = self._mj_model.site(IMU_SITE).id
-
     self._torso_body_id = self._mj_model.body(ROOT_BODY).id
     self._feet_site_id = np.array([self._mj_model.site(name).id for name in FEET_SITES])
     self._floor_geom_id = self._mj_model.geom("floor").id
@@ -206,9 +212,9 @@ class Biped():
       )
     self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
 
-  def reset(self, rng: jax.Array) -> utils.State:
+  def reset(self, rng: jax.Array) -> mjx_env.State:
     qpos = self._init_q
-    qvel = jp.zeros(self._mjx_model.nv)
+    qvel = jp.zeros(self.mjx_model.nv)
 
     # x=+U(-0.5, 0.5), y=+U(-0.5, 0.5), yaw=U(-3.14, 3.14).
     rng, key = jax.random.split(rng)
@@ -222,21 +228,23 @@ class Biped():
 
     # qpos[7:]=*U(0.5, 1.5)
     rng, key = jax.random.split(rng)
-    qpos = qpos.at[7:].set(qpos[7:] * jax.random.uniform(key, (self._nb_joints,), minval=-0.05, maxval=0.05))
+    qpos = qpos.at[7:].set(
+      qpos[7:] * jax.random.uniform(key, (10,), minval=-0.05, maxval=0.05))
 
     # d(xyzrpy)=U(-0.5, 0.5)
     rng, key = jax.random.split(rng)
-    qvel = qvel.at[0:6].set(jax.random.uniform(key, (6,), minval=-0.5, maxval=0.5))
+    qvel = qvel.at[0:6].set(
+      jax.random.uniform(key, (6,), minval=-0.5, maxval=0.5))
 
-    # Initialize data.
-    data = mjx.make_data(self._mjx_model)
+    # Initialize the data.
+    data = mjx.make_data(self.mjx_model)
     if qpos is not None:
       data = data.replace(qpos=qpos)
     if qvel is not None:
       data = data.replace(qvel=qvel)
     if qpos[7:] is not None:
       data = data.replace(ctrl=qpos[7:])
-    data = mjx.forward(self._mjx_model, data)
+    data = mjx.forward(self.mjx_model, data)
 
     # Phase, freq=U(1.0, 1.5)
     rng, key = jax.random.split(rng)
@@ -244,6 +252,7 @@ class Biped():
     phase_dt = 2 * jp.pi * self.ctrl_dt * gait_freq
     phase = jp.array([0, jp.pi])
 
+    # Sample the command.
     rng, cmd_rng = jax.random.split(rng)
     cmd = self.sample_command(cmd_rng)
 
@@ -262,7 +271,7 @@ class Biped():
         "command": cmd,
         "last_act": jp.zeros(self.action_size),
         "last_last_act": jp.zeros(self.action_size),
-        "motor_targets": jp.zeros(self._mjx_model.nu),
+        "motor_targets": jp.zeros(self.mjx_model.nu),
         "feet_air_time": jp.zeros(2),
         "last_contact": jp.zeros(2, dtype=bool),
         "swing_peak": jp.zeros(2),
@@ -275,19 +284,28 @@ class Biped():
         "push_interval_steps": push_interval_steps,
     }
 
+    # Initialize the metrics.
     metrics = {}
     for k in self._config.reward_config.scales.keys():
       metrics[f"reward/{k}"] = jp.zeros(())
     metrics["swing_peak"] = jp.zeros(())
+    
+    # Initialize the contact.
     contact = jp.array([
         geoms_colliding(data, geom_id, self._floor_geom_id)
         for geom_id in self._feet_geom_id
     ])
-    obs = self._get_obs(data, info, contact)
-    reward, done = jp.zeros(2)
-    return utils.State(data, obs, reward, done, metrics, info)
 
-  def step(self, state: utils.State, action: jax.Array) -> utils.State:
+    # Initialize the observation.
+    obs = self._get_obs(data, info, contact)
+    
+    # Initialize the reward and done.
+    reward, done = jp.zeros(2)
+
+    # Return the state.
+    return mjx_env.State(data, obs, reward, done, metrics, info)
+
+  def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
     state.info["rng"], push1_rng, push2_rng = jax.random.split(state.info["rng"], 3)
 
     push_theta = jax.random.uniform(push1_rng, maxval=2 * jp.pi)
@@ -307,22 +325,11 @@ class Biped():
     data = state.data.replace(qvel=qvel)
     state = state.replace(data=data)
 
-    # TODO: figure out how to write this less hardcoded.
-    # NOTE: this works only for the biped.
-    # actions_policy = jp.zeros(self._nb_joints)
-    # actions_policy = actions_policy.at[0].set(action[0]) # L_YAW
-    # actions_policy = actions_policy.at[1].set(action[1]) # L_HAA
-    # actions_policy = actions_policy.at[2].set(action[2]) # L_HFE
-    # actions_policy = actions_policy.at[3].set(action[3]) # L_KFE
-    # actions_policy = actions_policy.at[4].set(action[4]) # L_ANKLE
-    # actions_policy = actions_policy.at[5].set(action[5]) # R_YAW
-    # actions_policy = actions_policy.at[6].set(action[6]) # R_HAA
-    # actions_policy = actions_policy.at[7].set(action[7]) # R_HFE
-    # actions_policy = actions_policy.at[8].set(action[8]) # R_KFE
-    # actions_policy = actions_policy.at[9].set(action[9]) # R_ANKLE
-
+    # Step the model.
     motor_targets = self._default_q_joints + action * self._config.action_scale
-    data = utils.step(self._mjx_model, state.data, motor_targets, self.n_substeps)
+    data = mjx_env.step(
+      self.mjx_model, state.data, motor_targets, self._n_substeps
+    )
     state.info["motor_targets"] = motor_targets
 
     contact = jp.array([
@@ -339,6 +346,7 @@ class Biped():
     obs = self._get_obs(data, state.info, contact)
     done = self._get_termination(data)
 
+    # Get the rewards.
     rewards = self._get_reward(
         data, action, state.info, state.metrics, done, first_contact, contact
     )
@@ -376,29 +384,24 @@ class Biped():
     state = state.replace(data=data, obs=obs, reward=reward, done=done)
     return state
 
+  def _get_sensor_data(self, data: mjx.Data, sensor_name: str) -> jax.Array:
+    """Gets sensor data given sensor name."""
+    sensor_id = self.mj_model.sensor(sensor_name).id
+    sensor_adr = self.mj_model.sensor_adr[sensor_id]
+    sensor_dim = self.mj_model.sensor_dim[sensor_id]
+    return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
+
   def _get_termination(self, data: mjx.Data) -> jax.Array:
-    gravity = self.get_sensor_data(data, GRAVITY_SENSOR)
+    gravity = self._get_sensor_data(data, GRAVITY_SENSOR)
     fall_termination = gravity[-1] < 0.0
     return (
         fall_termination | jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
     )
 
-  def get_sensor_data(self, data: mjx.Data, sensor_name: str) -> jax.Array:
-      """Gets sensor data given sensor name."""
-      sensor_id = self._mj_model.sensor(sensor_name).id
-      sensor_adr = self._mj_model.sensor_adr[sensor_id]
-      sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
-
-  @property
-  def n_substeps(self) -> int:
-    """Number of sim steps per control step."""
-    return int(round(self.ctrl_dt / self._sim_dt))
-
   def _get_obs(
       self, data: mjx.Data, info: dict[str, Any], contact: jax.Array
-  ) -> utils.Observation:
-    gyro = self.get_sensor_data(data, GYRO_SENSOR)
+  ) -> mjx_env.Observation:
+    gyro = self._get_sensor_data(data, GYRO_SENSOR)
     info["rng"], noise_rng = jax.random.split(info["rng"])
     noisy_gyro = (
         gyro
@@ -438,7 +441,7 @@ class Biped():
     sin = jp.sin(info["phase"])
     phase = jp.concatenate([cos, sin])
     
-    linvel = self.get_sensor_data(data, LOCAL_LINVEL_SENSOR)
+    linvel = self._get_sensor_data(data, LOCAL_LINVEL_SENSOR)
     info["rng"], noise_rng = jax.random.split(info["rng"])
     noisy_linvel = (
         linvel
@@ -458,8 +461,8 @@ class Biped():
         phase,
     ])
 
-    accelerometer = self.get_sensor_data(data, ACCELEROMETER_SENSOR)
-    global_angvel = self.get_sensor_data(data, GLOBAL_ANGVEL_SENSOR)
+    accelerometer = self._get_sensor_data(data, ACCELEROMETER_SENSOR)
+    global_angvel = self._get_sensor_data(data, GLOBAL_ANGVEL_SENSOR)
     feet_vel = data.sensordata[self._foot_linvel_sensor_adr].ravel()
     root_height = data.qpos[2]
 
@@ -499,15 +502,15 @@ class Biped():
     return {
         # Tracking rewards.
         "tracking_lin_vel": self._reward_tracking_lin_vel(
-            info["command"], self.get_sensor_data(data, LOCAL_LINVEL_SENSOR)
+            info["command"], self._get_sensor_data(data, LOCAL_LINVEL_SENSOR)
         ),
         "tracking_ang_vel": self._reward_tracking_ang_vel(
-            info["command"], self.get_sensor_data(data, GYRO_SENSOR)
+            info["command"], self._get_sensor_data(data, GYRO_SENSOR)
         ),
         # Base-related rewards.
-        "lin_vel_z": self._cost_lin_vel_z(self.get_sensor_data(data, GLOBAL_LINVEL_SENSOR)),
-        "ang_vel_xy": self._cost_ang_vel_xy(self.get_sensor_data(data, GLOBAL_ANGVEL_SENSOR)),
-        "orientation": self._cost_orientation(self.get_sensor_data(data, GRAVITY_SENSOR)),
+        "lin_vel_z": self._cost_lin_vel_z(self._get_sensor_data(data, GLOBAL_LINVEL_SENSOR)),
+        "ang_vel_xy": self._cost_ang_vel_xy(self._get_sensor_data(data, GLOBAL_ANGVEL_SENSOR)),
+        "orientation": self._cost_orientation(self._get_sensor_data(data, GRAVITY_SENSOR)),
         "base_height": self._cost_base_height(data.qpos[2]),
         # Energy related rewards.
         "torques": self._cost_torques(data.actuator_force),
@@ -612,7 +615,7 @@ class Biped():
   # Feet related rewards.
   def _cost_feet_slip(self, data: mjx.Data, contact: jax.Array, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
-    lin_vel = self.get_sensor_data(data, LOCAL_LINVEL_SENSOR)
+    lin_vel = self._get_sensor_data(data, LOCAL_LINVEL_SENSOR)
     body_vel = lin_vel[:2]
     reward = jp.sum(jp.linalg.norm(body_vel, axis=-1) * contact)
     return reward
@@ -694,79 +697,30 @@ class Biped():
     )
 
   @property
-  def observation_size(self) -> utils.ObservationSize:
+  def observation_size(self) -> mjx_env.ObservationSize:
     return {
         "state": (self._state.size, ),
         "privileged_state": (self._privileged_state.size,),
     }
+  
+  # Accessors.
+  @property
+  def xml_path(self) -> str:
+    return self._xml_path
 
   @property
   def action_size(self) -> int:
-    return self._nb_joints
-  
-  def render(
-      self,
-      trajectory: List[utils.State],
-      height: int = 240,
-      width: int = 320,
-      camera: Optional[str] = None,
-      scene_option: Optional[mujoco.MjvOption] = None,
-      modify_scene_fns: Optional[
-          Sequence[Callable[[mujoco.MjvScene], None]]
-      ] = None,
-  ) -> Sequence[np.ndarray]:
-    return render_array(
-        self._mj_model,
-        trajectory,
-        height,
-        width,
-        camera,
-        scene_option=scene_option,
-        modify_scene_fns=modify_scene_fns,
-    )
+    return self.nb_joints
 
+  @property
+  def mj_model(self) -> mujoco.MjModel:
+    return self._mj_model
 
-def render_array(
-    mj_model: mujoco.MjModel,
-    trajectory: Union[List[utils.State], utils.State],
-    height: int = 480,
-    width: int = 640,
-    camera: Optional[str] = None,
-    scene_option: Optional[mujoco.MjvOption] = None,
-    modify_scene_fns: Optional[
-        Sequence[Callable[[mujoco.MjvScene], None]]
-    ] = None,
-    hfield_data: Optional[jax.Array] = None,
-):
-  """Renders a trajectory as an array of images."""
-  renderer = mujoco.Renderer(mj_model, height=height, width=width)
-  camera = camera or -1
+  @property
+  def mjx_model(self) -> mjx.Model:
+    return self._mjx_model
 
-  if hfield_data is not None:
-    mj_model.hfield_data = hfield_data.reshape(mj_model.hfield_data.shape)
-    mujoco.mjr_uploadHField(mj_model, renderer._mjr_context, 0)
-
-  def get_image(state, modify_scn_fn=None) -> np.ndarray:
-    d = mujoco.MjData(mj_model)
-    d.qpos, d.qvel = state.data.qpos, state.data.qvel
-    d.mocap_pos, d.mocap_quat = state.data.mocap_pos, state.data.mocap_quat
-    d.xfrc_applied = state.data.xfrc_applied
-    mujoco.mj_forward(mj_model, d)
-    renderer.update_scene(d, camera=camera, scene_option=scene_option)
-    if modify_scn_fn is not None:
-      modify_scn_fn(renderer.scene)
-    return renderer.render()
-
-  if isinstance(trajectory, list):
-    out = []
-    for i, state in enumerate(tqdm.tqdm(trajectory)):
-      if modify_scene_fns is not None:
-        modify_scene_fn = modify_scene_fns[i]
-      else:
-        modify_scene_fn = None
-      out.append(get_image(state, modify_scene_fn))
-  else:
-    out = get_image(trajectory)
-
-  renderer.close()
-  return out
+  @property
+  def _n_substeps(self) -> int:
+    """Number of sim steps per control step."""
+    return int(round(self.ctrl_dt / self._sim_dt))

@@ -84,6 +84,7 @@ ppo_params = brax_ppo_config
 # Environment.
 from biped_berkeley import Biped
 env = Biped()
+eval_env = Biped()
 
 x_data, y_data, y_dataerr = [], [], []
 times = [datetime.now()]
@@ -121,20 +122,21 @@ if "network_factory" in ppo_params:
       **ppo_params.network_factory
   )
 
-# from randomize import domain_randomize
+from randomize import domain_randomize
+
+# with jax.checking_leaks():
 train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),
     network_factory=network_factory,
     progress_fn=progress,
-    # randomization_fn=domain_randomize,
+    randomization_fn=domain_randomize,
     save_checkpoint_path=ABS_FOLDER_RESUlTS,
     # restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
 )
 
 make_inference_fn, params, metrics = train_fn(
     environment=env,
-    progress_fn=progress,
-    eval_env=env,
+    eval_env=eval_env,
     wrap_env_fn=wrap_for_brax_training,
 )
 print(f"time to jit: {times[1] - times[0]}")

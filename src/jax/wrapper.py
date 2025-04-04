@@ -22,7 +22,7 @@ from jax import numpy as jp
 import mujoco
 from mujoco import mjx
 
-import src.mjx_env as mjx_env
+import src.jax.mjx_env as mjx_env
 
 ### For Brax.
 
@@ -136,11 +136,11 @@ class BraxDomainRandomizationVmapWrapper(Wrapper):
       randomization_fn: Callable[[mjx.Model], Tuple[mjx.Model, mjx.Model]],
   ):
     super().__init__(env)
-    self._mjx_model_v, self._in_axes = randomization_fn(self._mjx_model)
+    self._mjx_model_v, self._in_axes = randomization_fn(self.mjx_model)
 
   def _env_fn(self, mjx_model: mjx.Model) -> mjx_env.MjxEnv:
     env = self.env
-    env._mjx_model = mjx_model
+    env.unwrapped._mjx_model = mjx_model
     return env
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
@@ -160,6 +160,7 @@ class BraxDomainRandomizationVmapWrapper(Wrapper):
         self._mjx_model_v, state, action
     )
     return res
+
 
 ### For Pytorch.
 # TODO: too complicated, simplify.
@@ -258,7 +259,7 @@ def test_VectorGymWrapper():
   # Biped
   episode_length = 1000
 
-  from biped_berkeley import Biped
+  from jax.biped_berkeley import Biped
   action_repeat = True
   batch_size = 100
   auto_reset = True
