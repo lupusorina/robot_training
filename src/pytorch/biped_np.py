@@ -14,8 +14,8 @@ import mujoco.viewer
 
 import numpy as np
 
-import jax.utils as utils
-from jax.utils import geoms_colliding_np, get_rz_np
+import pytorch.utils as utils
+from pytorch.utils import geoms_colliding_np, get_rz_np
 import tqdm
 
 def default_config() -> config_dict.ConfigDict:
