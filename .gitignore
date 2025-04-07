@@ -8,3 +8,4 @@ runs
 *.egg-info/
 logs/
 results/
+*.txt
