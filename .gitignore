@@ -5,4 +5,7 @@ __pycache__
 .venv
 runs
 .DS_Store
-*.egg-info
+*.egg-info/
+logs/
+results/
+*.txt

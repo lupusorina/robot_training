@@ -1,5 +1,5 @@
 <mujoco model="biped flat terrain scene">
-  <include file="biped.xml"/>
+  <include file="biped_v2.xml"/>
 
   <statistic center="0 0 0.1" extent="0.8" meansize="0.04"/>
 
@@ -20,8 +20,7 @@
   </asset>
 
   <worldbody>
-    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1"
-      friction="0.6" condim="3"/>
+    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1" friction="1 0.1 0.1" condim="3"/>
   </worldbody>
 
   <keyframe>
@@ -29,10 +28,10 @@
       qpos="
     0 0 0.6
     1 0 0 0
-    -0.071 0.103 -0.463 0.983 -0.350
-    0.071 -0.103 -0.463 0.983 -0.350"
+    0.0 0.0 -0.463 0.983 -0.350
+    0.0 -0.0 -0.463 0.983 -0.350"
       ctrl="
-    -0.071 0.103 -0.463 0.983 -0.350
-    0.071 -0.103 -0.463 0.983 -0.350"/>
+    0.0 0.0 -0.463 0.983 -0.350
+    0.0 -0.0 -0.463 0.983 -0.350"/>
   </keyframe>
 </mujoco>

@@ -1,7 +1,7 @@
 from ppo import Agent
 import torch
 import numpy as np
-from cart_pole import CartPole
+from tests.cart_pole import CartPole
 import matplotlib.pyplot as plt
 
 env = CartPole()
