@@ -14,8 +14,8 @@ import mujoco.viewer
 
 import numpy as np
 
-import pytorch.utils as utils
-from pytorch.utils import geoms_colliding_np, get_rz_np
+import utils as utils
+from utils import geoms_colliding_np, get_rz_np
 import tqdm
 
 def default_config() -> config_dict.ConfigDict:
@@ -83,11 +83,10 @@ def default_config() -> config_dict.ConfigDict:
   )
 
 NAME_ROBOT = 'biped'
-if NAME_ROBOT == 'berkeley_humanoid':
-    import assets.berkeley_humanoid.config as robot_config
 if NAME_ROBOT == 'biped':
-    import assets.biped.config as robot_config
-    # raise NotImplementedError
+    import src.assets.biped.config as robot_config
+else:
+    raise ValueError(f'NAME_ROBOT must be "biped"')
 
 XML_PATH = robot_config.XML_PATH
 ROOT_BODY = robot_config.ROOT_BODY
@@ -129,7 +128,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
         self._mj_model.vis.global_.offheight = 2160
-        self.visualize_mujoco = True
+        self.visualize_mujoco = False
         if self.visualize_mujoco is True:
             self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data, key_callback=self.key_callback)
 
@@ -308,11 +307,11 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         self.info["phase"] = np.fmod(phase_tp1 + np.pi, 2 * np.pi) - np.pi
         self.info["last_last_act"] = self.info["last_act"]
         self.info["last_act"] = action
-        # self.info["command"] = jp.where(
-        #     self.info["step"] > 500,
-        #     self.sample_command(cmd_rng),
-        #     self.info["command"],
-        # )
+        self.info["command"] = np.where(
+            self.info["step"] > 500,
+            self.sample_command(),
+            self.info["command"],
+        )
         self.info["step"] = np.where(
             done | (self.info["step"] > 500),
             0,
@@ -366,6 +365,30 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         ]) # 52
 
         return self._state
+
+    def sample_command(self, rng=None) -> np.ndarray:
+        if rng is None:
+            rng = np.random.default_rng()
+
+        # Sample linear and angular velocities
+        lin_vel_x = rng.uniform(
+            low=self._config.lin_vel_x[0],
+            high=self._config.lin_vel_x[1]
+        )
+        lin_vel_y = rng.uniform(
+            low=self._config.lin_vel_y[0],
+            high=self._config.lin_vel_y[1]
+        )
+        ang_vel_yaw = rng.uniform(
+            low=self._config.ang_vel_yaw[0],
+            high=self._config.ang_vel_yaw[1]
+        )
+
+        # With 10% chance, set everything to zero
+        if rng.random() < 0.1:
+            return np.zeros(3)
+        else:
+            return np.array([lin_vel_x, lin_vel_y, ang_vel_yaw])
 
     def _get_rew(self,
                  done: bool,
