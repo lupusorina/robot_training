@@ -1,8 +1,7 @@
 #@title Import Brax and some helper modules
 
 # Envs.
-from src.cart_pole import CartPoleJax
-from biped_berkeley import Biped
+from biped_np import Biped
 
 from IPython.display import clear_output
 
@@ -101,10 +100,7 @@ def create(
   Returns:
     env: an environment
   """
-  if env_name == 'cartpole':
-      env = CartPoleJax(**kwargs, backend='mjx')
-      print("Training CartPole")
-  elif env_name == 'biped':
+  if env_name == 'biped':
       env = Biped()
       print("Training Biped")
   else:
@@ -120,7 +116,7 @@ def create(
   return env
 
 def train(
-    env_name: str = 'cartpole',
+    env_name: str = 'biped',
     num_envs: int = 2048,
     episode_length: int = 1000,
     device: str = 'cuda',
@@ -139,8 +135,8 @@ def train(
   """Trains a policy via PPO."""
   env = create(env_name, batch_size=num_envs,
                 episode_length=episode_length)
-  env = VectorGymWrapper(env)
-  env = TorchWrapper(env, device=device) # convert between jax ndarrays and torch tensors:
+  # env = VectorGymWrapper(env)
+  # env = TorchWrapper(env, device=device) # convert between jax ndarrays and torch tensors:
 
   # env warmup
   env.reset()
