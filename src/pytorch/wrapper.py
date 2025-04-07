@@ -23,12 +23,12 @@ class VectorGymWrapper(gym.vector.VectorEnv):
     self.backend = backend
     self._state = None
 
-    obs_size = self._env.observation_size["state"]
+    obs_size = self._env.observation_size
     obs = np.inf * np.ones(obs_size, dtype='float32') # TODO: add obs size in brax.
     obs_space = spaces.Box(-obs, obs, dtype='float32')
     self.observation_space = utils.batch_space(obs_space, self.num_envs)
 
-    action = jax.tree.map(np.array, self._env.sys.actuator.ctrl_range)
+    action = jax.tree.map(np.array, self._env.ctrl_range)
     action_space = spaces.Box(action[:, 0], action[:, 1], dtype='float32')
     self.action_space = utils.batch_space(action_space, self.num_envs)
 
@@ -97,7 +97,7 @@ def test_VectorGymWrapper():
   # Biped
   episode_length = 1000
 
-  from jax.biped_berkeley import Biped
+  from jax.biped import Biped
   action_repeat = True
   batch_size = 100
   auto_reset = True
