@@ -139,6 +139,26 @@ class Biped(mjx_env.MjxEnv):
     self.action_space = jp.zeros(self.action_size)
     print(f"Number of joints: {self.nb_joints}")
 
+    # Used for logging.
+    self.state_header = ['noisy_vel_x', 'noisy_vel_y', 'noisy_vel_z', # 3 noisy_linvel
+                          'noisy_gyro_x', 'noisy_gyro_y', 'noisy_gyro_z', # 3 noisy_gyro
+                          'noisy_gravity_x', 'noisy_gravity_y', 'noisy_gravity_z', # 3 noisy_gravity
+                          'command_x', 'command_y', 'command_z', # 3 info["command"]
+
+                          'res_L_YAW_pos', 'res_L_HAA_pos', 'res_L_HFE_pos', 'res_L_KFE_pos', 'res_L_ANKLE_pos', # 4 noisy_joint_angles - self._default_q_joints
+                          'res_R_YAW_pos', 'res_R_HAA_pos', 'res_R_HFE_pos', 'res_R_KFE_pos', 'res_R_ANKLE_pos', # 5 noisy_joint_angles - self._default_q_joints
+
+                          'L_YAW_vel', 'L_HAA_vel', 'L_HFE_vel', 'L_KFE_vel', 'L_ANKLE_vel', # 5 noisy_joint_vel
+                          'R_YAW_vel', 'R_HAA_vel', 'R_HFE_vel', 'R_KFE_vel', 'R_ANKLE_vel', # 5 noisy_joint_vel
+
+                          'res_last_act_L_YAW', 'res_last_act_L_HAA', 'res_last_act_L_HFE', 'res_last_act_L_KFE', 'res_last_act_L_ANKLE',
+                          'res_last_act_R_YAW', 'res_last_act_R_HAA', 'res_last_act_R_HFE', 'res_last_act_R_KFE', 'res_last_act_R_ANKLE',
+
+                          'phase_1', 'phase_2', 'phase_3', 'phase_4'] # phase TODO: figure out why we have 4 phases
+
+    self.ctrl_header = ['res_L_YAW', 'res_L_HAA', 'res_L_HFE', 'res_L_KFE', 'res_L_ANKLE',
+                        'res_R_YAW', 'res_R_HAA', 'res_R_HFE', 'res_R_KFE', 'res_R_ANKLE']
+
     self._post_init()
 
   def _post_init(self) -> None:
