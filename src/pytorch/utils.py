@@ -1,9 +1,7 @@
 from typing import Union
 
-import jax
-import jax.numpy as jp
-import mujoco
 import numpy as np
+import mujoco
 from mujoco import mjx
 from flax import struct
 
@@ -11,18 +9,18 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 
 def get_rz_np(
-    phi: Union[jax.Array, float],
-    swing_height: Union[jax.Array, float] = 0.08
-) -> jax.Array:
+    phi: Union[np.ndarray, float],
+    swing_height: Union[np.ndarray, float] = 0.08
+) -> np.ndarray:
   def cubic_bezier_interpolation(y_start, y_end, x):
     y_diff = y_end - y_start
     bezier = x**3 + 3 * (x**2 * (1 - x))
     return y_start + y_diff * bezier
 
-  x = (phi + jp.pi) / (2 * jp.pi)
+  x = (phi + np.pi) / (2 * np.pi)
   stance = cubic_bezier_interpolation(0, swing_height, 2 * x)
   swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
-  return jp.where(x <= 0.5, stance, swing)
+  return np.where(x <= 0.5, stance, swing)
 
 def get_collision_info_np(
     contact: Any, geom1: int, geom2: int
