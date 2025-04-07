@@ -82,7 +82,7 @@ brax_ppo_config = config_dict.create(
 ppo_params = brax_ppo_config
 
 # Environment.
-from biped_berkeley import Biped
+from biped import Biped
 env = Biped()
 eval_env = Biped()
 
