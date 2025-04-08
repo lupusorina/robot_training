@@ -102,12 +102,13 @@ IMU_SITE = robot_config.IMU_SITE
 HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 
-class Biped(MujocoEnv, gym_utils.EzPickle):
+class Biped():
     """Track a joystick command."""
 
     def __init__(self,
       config: config_dict.ConfigDict = default_config(),
-      config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None
+      config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
+      render: bool = False
       ):
         # Config.
         self._config = config.lock()
@@ -128,7 +129,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
         self._mj_model.vis.global_.offheight = 2160
-        self.visualize_mujoco = False
+        self.visualize_mujoco = render
         if self.visualize_mujoco is True:
             self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data, key_callback=self.key_callback)
 
@@ -595,7 +596,7 @@ class Biped(MujocoEnv, gym_utils.EzPickle):
 
 
 def main():
-    biped = Biped()
+    biped = Biped(render=True)
     biped.reset_model()
 
     for _ in tqdm.tqdm(range(100000)):
