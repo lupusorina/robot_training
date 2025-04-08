@@ -3,10 +3,10 @@
   Modified by Sorina Lupu (eslupu@caltech.edu)
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List, Callable, Sequence
 from ml_collections import config_dict
 import mujoco
-
+import gymnasium as gym
 from gymnasium import utils as gym_utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
@@ -17,6 +17,9 @@ import numpy as np
 import utils as utils
 from utils import geoms_colliding_np, get_rz_np
 import tqdm
+
+import mediapy as media
+
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
@@ -102,13 +105,14 @@ IMU_SITE = robot_config.IMU_SITE
 HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 
-class Biped():
+class Biped(gym.Env):
     """Track a joystick command."""
 
     def __init__(self,
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
-      render: bool = False
+      render: bool = False,
+      paused: bool = False,
       ):
         # Config.
         self._config = config.lock()
@@ -117,12 +121,12 @@ class Biped():
 
         # Initialize Mujoco.
         self.ctrl_dt = config.ctrl_dt
-        self._sim_dt = config.sim_dt
+        self.sim_dt = config.sim_dt
         self._mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
         self.data = mujoco.MjData(self._mj_model)
-        self._mj_model.opt.timestep = self._sim_dt
+        self._mj_model.opt.timestep = self.sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
-        self.paused = True
+        self.paused = paused
         print(f"Number of joints: {self._nb_joints}")
         print(f"Nb controls: {self._mj_model.nu}")
 
@@ -594,19 +598,110 @@ class Biped():
         reward = np.exp(-error / 0.01)
         return reward
 
+    def render(
+        self,
+        trajectory, #: List[State],
+        height: int = 240,
+        width: int = 320,
+        camera: Optional[str] = None,
+        scene_option: Optional[mujoco.MjvOption] = None,
+        modify_scene_fns: Optional[
+            Sequence[Callable[[mujoco.MjvScene], None]]
+        ] = None,
+    ) -> Sequence[np.ndarray]:
+        return render_array(
+            self._mj_model,
+            trajectory,
+            height,
+            width,
+            camera,
+            scene_option=scene_option,
+            modify_scene_fns=modify_scene_fns,
+        )
 
-def main():
-    biped = Biped(render=True)
-    biped.reset_model()
+def render_array(
+    mj_model: mujoco.MjModel,
+    trajectory, # Union[List[State], State], # TODO: fix this
+    height: int = 480,
+    width: int = 640,
+    camera: Optional[str] = None,
+    scene_option: Optional[mujoco.MjvOption] = None,
+    modify_scene_fns: Optional[
+        Sequence[Callable[[mujoco.MjvScene], None]]
+    ] = None,
+    hfield_data = None,
+):
+  """Renders a trajectory as an array of images."""
+  renderer = mujoco.Renderer(mj_model, height=height, width=width)
+  camera = camera or -1
 
-    for _ in tqdm.tqdm(range(100000)):
-        # action = np.random.uniform(-1, 1, biped.action_size)
-        action = np.zeros(biped.action_size)
-        obs, rewards, done, _, _ = biped.step(action)
-        # if done:
-        #     print("Done!")
-        #     break
+  if hfield_data is not None:
+    mj_model.hfield_data = hfield_data.reshape(mj_model.hfield_data.shape)
+    mujoco.mjr_uploadHField(mj_model, renderer._mjr_context, 0)
+
+  def get_image(state, modify_scn_fn=None) -> np.ndarray:
+    d = mujoco.MjData(mj_model)
+    d.qpos, d.qvel = state['qpos'], state['qvel']
+    d.xfrc_applied = state['xfrc_applied']
+    mujoco.mj_forward(mj_model, d)
+    renderer.update_scene(d, camera=camera, scene_option=scene_option)
+    if modify_scn_fn is not None:
+      modify_scn_fn(renderer.scene)
+    return renderer.render()
+
+  if isinstance(trajectory, list):
+    out = []
+    for i, state in enumerate(tqdm.tqdm(trajectory)):
+      if modify_scene_fns is not None:
+        modify_scene_fn = modify_scene_fns[i]
+      else:
+        modify_scene_fn = None
+      out.append(get_image(state, modify_scene_fn))
+  else:
+    out = get_image(trajectory)
+
+  renderer.close()
+  return out
 
 if __name__ == "__main__":
-    main()        
 
+    env = Biped(render=False)
+    env.reset_model()
+
+    rollout = []
+
+    for _ in tqdm.tqdm(range(1000)):
+        # action = np.random.uniform(-1, 1, env.action_size)
+        action = np.zeros(env.action_size)
+        obs, rewards, done, _, _ = env.step(action)
+        state = {
+            'qpos': env.data.qpos.copy(),
+            'qvel': env.data.qvel.copy(),
+            'xfrc_applied': env.data.xfrc_applied.copy()
+        }
+        rollout.append(state)
+
+    render_every = 1 # int.
+    fps = 1/ env.sim_dt / render_every
+    traj = rollout[::render_every]
+
+    scene_option = mujoco.MjvOption()
+    scene_option.geomgroup[2] = True
+    scene_option.geomgroup[3] = False
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+    frames = env.render(
+        traj,
+        camera="track",
+        scene_option=scene_option,
+        width=640,
+        height=480,
+    )
+
+    # media.show_video(frames, fps=fps, loop=False)
+    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
+    # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 biped_np.py
+    media.write_video(f'joystick_testing.mp4', frames, fps=fps)
+    print('Video saved')
