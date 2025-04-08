@@ -111,7 +111,7 @@ class Biped(gym.Env):
     def __init__(self,
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
-      render: bool = False,
+      visualize: bool = False,
       paused: bool = False,
       ):
         # Config.
@@ -133,7 +133,7 @@ class Biped(gym.Env):
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
         self._mj_model.vis.global_.offheight = 2160
-        self.visualize_mujoco = render
+        self.visualize_mujoco = visualize
         if self.visualize_mujoco is True:
             self.viewer = mujoco.viewer.launch_passive(self._mj_model, self.data, key_callback=self.key_callback)
 
@@ -665,7 +665,7 @@ def render_array(
 
 if __name__ == "__main__":
 
-    env = Biped(render=False)
+    env = Biped(visualize=False)
     env.reset_model()
 
     rollout = []
