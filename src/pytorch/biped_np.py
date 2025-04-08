@@ -152,8 +152,8 @@ class Biped(gym.Env):
             self.paused = not self.paused
 
     def _post_init(self) -> None:
-        self._init_q = self._mj_model.keyframe("home").qpos
-        self._default_q_joints = self._mj_model.keyframe("home").qpos[7:]
+        self._init_q = self._mj_model.keyframe("home").qpos.copy()
+        self._default_q_joints = self._mj_model.keyframe("home").qpos[7:].copy()
 
         q_j_min, q_j_max = self._mj_model.jnt_range[1:].T # Note: First joint is freejoint.
         c = (q_j_min + q_j_max) / 2
