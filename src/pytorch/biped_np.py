@@ -127,8 +127,8 @@ class Biped(gym.Env):
         self._mj_model.opt.timestep = self.sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
         self.paused = paused
-        print(f"Number of joints: {self._nb_joints}")
-        print(f"Nb controls: {self._mj_model.nu}")
+        if self.paused:
+            print("Warning: Paused mode is enabled!")
 
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
