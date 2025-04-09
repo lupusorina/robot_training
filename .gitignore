@@ -10,3 +10,7 @@ logs/
 results/
 *.txt
 *.TXT
+play.py
+CNF_model/
+MLE_model/
+CNF_train.py
