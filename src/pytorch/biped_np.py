@@ -127,8 +127,8 @@ class Biped(gym.Env):
         self._mj_model.opt.timestep = self.sim_dt
         self._nb_joints = self._mj_model.njnt - 1 # First joint is freejoint.
         self.paused = paused
-        print(f"Number of joints: {self._nb_joints}")
-        print(f"Nb controls: {self._mj_model.nu}")
+        if self.paused:
+            print("Warning: Paused mode is enabled!")
 
         # Set visualization settings.
         self._mj_model.vis.global_.offwidth = 3840
@@ -152,8 +152,8 @@ class Biped(gym.Env):
             self.paused = not self.paused
 
     def _post_init(self) -> None:
-        self._init_q = self._mj_model.keyframe("home").qpos
-        self._default_q_joints = self._mj_model.keyframe("home").qpos[7:]
+        self._init_q = self._mj_model.keyframe("home").qpos.copy()
+        self._default_q_joints = self._mj_model.keyframe("home").qpos[7:].copy()
 
         q_j_min, q_j_max = self._mj_model.jnt_range[1:].T # Note: First joint is freejoint.
         c = (q_j_min + q_j_max) / 2
@@ -219,7 +219,7 @@ class Biped(gym.Env):
 
     def reset_model(self):
         # Setup initial states.
-        qpos = self._init_q
+        qpos = self._init_q.copy()
         qvel = np.zeros(self._mj_model.nv)
 
         # Randomize x=+U(-0.5, 0.5), y=+U(-0.5, 0.5), yaw=U(-3.14, 3.14).
@@ -228,7 +228,7 @@ class Biped(gym.Env):
         # TODO: add quaternion rotation
 
         # Randomize joint angles.
-        qpos[7:] = qpos[7:] + np.random.uniform(-0.5, 0.5, self._nb_joints)
+        qpos[7:] = qpos[7:] + np.random.uniform(-0.05, 0.05, self._nb_joints)
 
         # Randomize velocity.
         qvel[0:6] = np.random.uniform(-0.5, 0.5, 6)
@@ -267,7 +267,7 @@ class Biped(gym.Env):
         # Apply action.
         motor_targets = self._default_q_joints + action * self._config.action_scale
         self.info["motor_targets"] = motor_targets
-        self.data.ctrl = motor_targets
+        self.data.ctrl = motor_targets.copy()
 
         # Step the model.
         if not self.paused:
@@ -336,16 +336,16 @@ class Biped(gym.Env):
         noisy_gyro = gyro.copy() # TODO: add  noise
 
         # Gravity.
-        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3)
+        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3).copy()
         gravity = R_gravity_sensor.T @ np.array([0, 0, -1]) # TODO: check this
         noisy_gravity = gravity.copy() # TODO: add noise
 
         # Joint angles.
-        joint_angles = self.data.qpos[7:]
+        joint_angles = self.data.qpos[7:].copy()
         noisy_joint_angles = joint_angles.copy()
 
         # Joint velocities.
-        joint_vel = self.data.qvel[6:]
+        joint_vel = self.data.qvel[6:].copy()
         noisy_joint_vel = joint_vel.copy()
 
         # Phase.
@@ -414,11 +414,11 @@ class Biped(gym.Env):
             "orientation": self._cost_orientation(self.get_sensor_data(GRAVITY_SENSOR)),
             "base_height": self._cost_base_height(self.data.qpos[2]),
             # Energy related rewards.
-            "torques": self._cost_torques(self.data.actuator_force),
+            "torques": self._cost_torques(self.data.actuator_force.copy()),
             "action_rate": self._cost_action_rate(
                 action, self.info["last_act"], self.info["last_last_act"]
             ),
-            "energy": self._cost_energy(self.data.qvel[6:], self.data.actuator_force),
+            "energy": self._cost_energy(self.data.qvel[6:].copy(), self.data.actuator_force.copy()),
             # Feet related rewards.
             "feet_slip": self._cost_feet_slip(self.data, contact, self.info),
             "feet_clearance": self._cost_feet_clearance(self.data, self.info),
@@ -437,14 +437,14 @@ class Biped(gym.Env):
             # Other rewards.
             "alive": self._reward_alive(),
             "termination": self._cost_termination(done),
-            "stand_still": self._cost_stand_still(self.info["command"], self.data.qpos[7:]),
+            "stand_still": self._cost_stand_still(self.info["command"], self.data.qpos[7:].copy()),
             # Pose related rewards.
             "joint_deviation_hip": self._cost_joint_deviation_hip(
-                self.data.qpos[7:], self.info["command"]
+                self.data.qpos[7:].copy(), self.info["command"]
             ),
-            "joint_deviation_knee": self._cost_joint_deviation_knee(self.data.qpos[7:]),
-            "dof_pos_limits": self._cost_joint_pos_limits(self.data.qpos[7:]),
-            "pose": self._cost_joint_angles(self.data.qpos[7:]),
+            "joint_deviation_knee": self._cost_joint_deviation_knee(self.data.qpos[7:].copy()),
+            "dof_pos_limits": self._cost_joint_pos_limits(self.data.qpos[7:].copy()),
+            "pose": self._cost_joint_angles(self.data.qpos[7:].copy()),
         }
 
     def _get_termination(self):
@@ -459,7 +459,7 @@ class Biped(gym.Env):
       sensor_id = self._mj_model.sensor(sensor_name).id
       sensor_adr = self._mj_model.sensor_adr[sensor_id]
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim]
+      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim].copy()
 
     @property
     def action_size(self) -> int:
@@ -550,9 +550,10 @@ class Biped(gym.Env):
                              info) -> np.ndarray:
         del info  # Unused.
         feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+        feet_vel = feet_vel.copy() # Add copy here
         vel_xy = feet_vel[..., :2]
         vel_norm = np.sqrt(np.linalg.norm(vel_xy, axis=-1))
-        foot_pos = data.site_xpos[self._feet_site_id]
+        foot_pos = data.site_xpos[self._feet_site_id].copy()
         foot_z = foot_pos[..., -1]
         delta = np.abs(foot_z - self._config.reward_config.max_foot_height)
         return np.sum(delta * vel_norm)
@@ -591,7 +592,7 @@ class Biped(gym.Env):
     ) -> np.ndarray:
         # Reward for tracking the desired foot height.
         del commands  # Unused.
-        foot_pos = data.site_xpos[self._feet_site_id]
+        foot_pos = data.site_xpos[self._feet_site_id].copy()
         foot_z = foot_pos[..., -1]
         rz = utils.get_rz_np(phase, swing_height=foot_height)
         error = np.sum(np.square(foot_z - rz))
