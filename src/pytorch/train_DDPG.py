@@ -11,6 +11,15 @@ from biped_np import *
 
 from tqdm import tqdm
 
+#from CNF_train import ConditionalNormalizingFlow
+from MLE_train import ContinuousActionNN
+
+# device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+# print(f"Using device: {device}")
+device = 'cpu'
+NB_TRAINING_CYCLES = 1
+NOISE = 'OrnsteinUhlenbeck' # 'Gaussian' or 'OrnsteinUhlenbeck'
+PLOTTING = False
 
 
 
@@ -189,51 +198,21 @@ class DDPG:
         self.q_loss.append(critic_loss.detach().cpu().numpy().item())
 
 
-class SparsePendulumRewardWrapper(gym.Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
-    
-    def step(self, obs, action):
-        # Take a step using the underlying environment
-        cos_theta, sin_theta, thdot = obs[0], obs[1], obs[2]
-        th = np.arctan2(sin_theta, cos_theta) 
-        th = angle_normalize(th)
-        cost = - (10*np.tanh(10*th**2) + 0.1*thdot**2 + 0.001*action**2)
-        obs_, _, terminated, truncated, info = self.env.step(action)
-        
-        return obs_, cost.squeeze(), terminated, truncated, info
-
-def angle_normalize(x):
-        return ((x + np.pi) % (2 * np.pi)) - np.pi
-
-
-
-# device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-# print(f"Using device: {device}")
-device = 'cpu'
-NB_TRAINING_CYCLES = 1
-NOISE = 'OrnsteinUhlenbeck' # 'Gaussian' or 'OrnsteinUhlenbeck'
-PLOTTING = False
 
 
 if __name__ == '__main__':
     
-    if NOISE == 'Gaussian':
-        noise = Normal(loc=0, scale=0.2)
-    elif NOISE == 'OrnsteinUhlenbeck':
-        noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
-    else:
-        raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
-    
     env = Biped()
+    robot_state_dim = env.observation_size[0]
+    robot_action_dim = env.action_size
+    
     env.visualize_mujoco = True
     env.reset_model()
     
-    
-
-    state_dim = env.observation_size[0]
-    action_dim = env.action_size
-    print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
+    mle_weight_path = 'MLE_model/P(a|s).pth'
+    expert = ContinuousActionNN(state_dim=robot_state_dim,action_dim=robot_action_dim)
+    expert.load_state_dict(torch.load(mle_weight_path, map_location=device, weights_only=True))
+    expert.eval()
     
     
     action_low = env._soft_q_j_min
@@ -255,11 +234,11 @@ if __name__ == '__main__':
         np.random.seed(seed_np)
         print(f'\nUsing seed {seed_np} for numpy and {seed_torch} for torch')
 
-        behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
-        target_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
+        behavior_policy = Policy(state_dim=robot_state_dim, action_dim=robot_action_dim, policy_lr=1e-3)
+        target_policy = Policy(state_dim=robot_state_dim, action_dim=robot_action_dim, policy_lr=1e-3)
           
-        behavior_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
-        target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
+        behavior_q = Value(state_dim=robot_state_dim, action_dim=robot_action_dim, value_lr=1e-3)
+        target_q = Value(state_dim=robot_state_dim, action_dim=robot_action_dim, value_lr=1e-3)
 
         models = [behavior_policy, behavior_q]
         for model in models:
@@ -273,22 +252,24 @@ if __name__ == '__main__':
                     value_network=behavior_q, target_value_function=target_q,
                     discount_factor=discount_gamma, seed=seed_torch, device=device)
         
-        memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
+        memory = DDPGMemory(state_dim=robot_state_dim, action_dim=robot_action_dim, buffer_length=buffer_length)
 
 
         obs = env.reset_model()
         episodic_returns = []
         cumulative_reward = 0
-
+        print( "... Training Starts ...")
         for t in tqdm(range(training_steps), desc=f"Cycle {cycles+1}", unit="step"):
             with torch.no_grad():
-                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-                expl_noise = noise.sample(action.shape)
-                noisy_action = action.cpu().numpy() + expl_noise.cpu().numpy()
+                robot_state = torch.tensor(obs, dtype=torch.float32, device=device)
+                # print(f"Robot state: {robot_state.shape}")
+                action = behavior_policy.forward(robot_state)
+                expert_action,_ = expert(robot_state)
+                noisy_action = action.cpu().numpy() + expert_action.cpu().numpy()
                 clipped_action = np.clip(noisy_action,
                                             a_min=action_low,
                                             a_max=action_high)
-                
+
                 obs_, reward, termination, truncation, _ = env.step(clipped_action)
                 done = termination or truncation
                 cumulative_reward += reward
