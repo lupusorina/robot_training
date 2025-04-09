@@ -68,18 +68,18 @@ class DDPGMemory:
         )    
 
 class Policy(nn.Module):
-    def __init__(self, state_dim, action_dim, policy_lr=1e-3, device='cpu'):
+    def __init__(self, state_dim, action_dim, policy_lr=4e-4, device='cpu'):
         super().__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
-    
+
         self.linear_layer_1 = nn.Linear(self.state_dim, 400)
         self.linear_layer_2 = nn.Linear(400, 300)
         self.action_layer = nn.Linear(300, self.action_dim)
 
         self.optimizer = optim.Adam(self.parameters(), policy_lr)
         self.to(device)
-        
+
     def forward(self, inputs):
         x = functional.relu(self.linear_layer_1(inputs))
         x = functional.relu(self.linear_layer_2(x))
@@ -87,7 +87,7 @@ class Policy(nn.Module):
         return 2 * torch.tanh(self.action_layer(x))
 
 class Value(nn.Module):
-    def __init__(self, state_dim, action_dim, value_lr=1e-3, device='cpu'):
+    def __init__(self, state_dim, action_dim, value_lr=4e-3, device='cpu'):
         super().__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
