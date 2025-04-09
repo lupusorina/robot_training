@@ -238,21 +238,19 @@ if __name__ == '__main__':
     list_of_all_the_data = []
 
     for cycles in range(NB_TRAINING_CYCLES):
-        seed_torch = np.random.randint(0, 2**32 - 1)
-        torch.manual_seed(seed_torch)
-        seed_np = np.random.randint(0, 2**32 - 1)
-        np.random.seed(seed_np)
-        print(f'\nUsing seed {seed_np} for numpy and {seed_torch} for torch')
+        seed = 42
+        torch.manual_seed(seed)
+        np.random.seed(seed)
 
-        behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
-        target_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
+        behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3, device=device)
+        target_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3, device=device)
 
-        behavior_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
-        target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
+        behavior_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
+        target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
 
         models = [behavior_policy, behavior_q]
-        for model in models:
-            init_model_weights(model, seed=seed_torch)
+        # for model in models:
+        #     init_model_weights(model, seed=seed) # Sorina: I don't think this is needed
 
         target_policy.load_state_dict(behavior_policy.state_dict())
         target_q.load_state_dict(behavior_q.state_dict())
@@ -260,7 +258,7 @@ if __name__ == '__main__':
 
         agent = DDPG(policy_network=behavior_policy, target_policy=target_policy,
                     value_network=behavior_q, target_value_function=target_q,
-                    discount_factor=discount_gamma, seed=seed_torch, device=device)
+                    discount_factor=discount_gamma, seed=seed, device=device)
 
         memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
 
@@ -274,15 +272,17 @@ if __name__ == '__main__':
                 action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
                 expl_noise = noise.sample(action.shape)
                 noisy_action = action.cpu().numpy() + expl_noise.cpu().numpy()
-                clipped_action = np.clip(noisy_action,
-                                            a_min=action_low,
-                                            a_max=action_high)
                 
-                obs_, reward, termination, truncation, _ = env.step(clipped_action)
+                # TODO: clip needs to be done differently, considering also qpos_joints
+                # clipped_action = np.clip(noisy_action,
+                #                             a_min=action_low,
+                #                             a_max=action_high)
+
+                obs_, reward, termination, truncation, _ = env.step(noisy_action)
                 done = termination or truncation
                 cumulative_reward += reward
                 
-                memory.add_sample(state=obs, action=clipped_action, reward=reward, next_state=obs_, done=done)
+                memory.add_sample(state=obs, action=noisy_action, reward=reward, next_state=obs_, done=done)
 
             if t>=warm_up and len(memory.states) >= batch_size:
                 agent.train(memory_buffer=memory, batch_size=batch_size,epochs=1)
