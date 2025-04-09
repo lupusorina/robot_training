@@ -206,7 +206,6 @@ if __name__ == '__main__':
     robot_state_dim = env.observation_size[0]
     robot_action_dim = env.action_size
     
-    env.visualize_mujoco = True
     env.reset_model()
     
     mle_weight_path = 'MLE_model/P(a|s).pth'
