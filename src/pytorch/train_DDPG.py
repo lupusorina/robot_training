@@ -236,21 +236,17 @@ if __name__ == '__main__':
     else:
         raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
     
-    env = Biped()
-    env.visualize_mujoco = True
+    env = Biped(visualize=False)
     env.reset_model()
-    
-    
 
     state_dim = env.observation_size[0]
     action_dim = env.action_size
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
-    
-    
+
     action_low = env._soft_q_j_min
     action_high = env._soft_q_j_max
     print(f"Action low: {action_low}, Action high: {action_high}")
-    
+
     training_steps = 30000
     warm_up = 0
     discount_gamma = 0.99
@@ -268,7 +264,7 @@ if __name__ == '__main__':
 
         behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
         target_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3)
-          
+
         behavior_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
         target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3)
 
@@ -279,11 +275,11 @@ if __name__ == '__main__':
         target_policy.load_state_dict(behavior_policy.state_dict())
         target_q.load_state_dict(behavior_q.state_dict())
 
-        
+
         agent = DDPG(policy_network=behavior_policy, target_policy=target_policy,
                     value_network=behavior_q, target_value_function=target_q,
                     discount_factor=discount_gamma, seed=seed_torch, device=device)
-        
+
         memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
 
 
@@ -305,17 +301,18 @@ if __name__ == '__main__':
                 cumulative_reward += reward
                 
                 memory.add_sample(state=obs, action=clipped_action, reward=reward, next_state=obs_, done=done)
-            
+
             if t>=warm_up and len(memory.states) >= batch_size:
                 agent.train(memory_buffer=memory, batch_size=batch_size,epochs=1)
             
             if done:
-                episodic_returns.append(cumulative_reward)
+                episodic_returns.append(cumulative_reward.item())
+                print('Reward: ', cumulative_reward.item())
                 cumulative_reward = 0
                 obs = env.reset_model()
             else:
                 obs = obs_.copy()
-        
+
         for i in range(len(agent.pi_loss)):
             list_of_all_the_data.append({
                 'cycle': cycles + 1,
@@ -323,38 +320,65 @@ if __name__ == '__main__':
                 'q_loss': agent.q_loss[i],
                 'return': episodic_returns[i] if i < len(episodic_returns) else np.nan,
             })
-        
+
+        # Plot the reward.
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(episodic_returns)
+        ax.set_title(f'{NOISE} added Noise')
+        ax.set_xlabel('Training Steps')
+        ax.set_ylabel('Episodic Returns')
+        plt.savefig(f'{ABS_FOLDER_RESUlTS}/{NOISE}_{cycles}.png')
+        plt.close()
+
+        # Save the results.
+        df = pd.DataFrame(list_of_all_the_data)
+        df.to_csv(f'{ABS_FOLDER_RESUlTS}/{NOISE}_{cycles}.csv', index=False)
+
+        # Save the behaviour policy.
+        torch.save(behavior_policy.state_dict(), f'{ABS_FOLDER_RESUlTS}/policy_{cycles}.pth')
+
+    # Test the policy.
     env = None
 
-    biped = Biped()
-    obs = biped.reset_model()
-    for _ in tqdm(range(100000)):
-        # action = np.random.uniform(-1, 1, biped.action_size)
+    test_env = Biped()
+    obs = test_env.reset_model()
+    rollout = []
+    for _ in tqdm(range(10000)):
+        # action = np.random.uniform(-1, 1, test_env.action_size)
         with torch.no_grad():
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
             action = action.cpu().numpy()
         action = np.clip(action, a_min=action_low, a_max=action_high)
-        obs, rewards, done, _, _ = biped.step(action)
+        obs, rewards, done, _, _ = test_env.step(action)
 
-        # if done:
-        #     print("Done!")
-        #     break
-    # df = pd.DataFrame(list_of_all_the_data)
+        state = {
+            'qpos': test_env.data.qpos.copy(),
+            'qvel': test_env.data.qvel.copy(),
+            'xfrc_applied': test_env.data.xfrc_applied.copy()
+        }
+        rollout.append(state)
 
-    # DATA_FOLDER = 'Data/CSVs/Metrics/tests'
-    # if not os.path.exists(DATA_FOLDER):
-    #     os.makedirs(DATA_FOLDER)
+    render_every = 1 # int.
+    fps = 1/ test_env.sim_dt / render_every
+    traj = rollout[::render_every]
 
-    # df.to_csv(f'{DATA_FOLDER}/{NOISE}.csv', index=False)
+    scene_option = mujoco.MjvOption()
+    scene_option.geomgroup[2] = True
+    scene_option.geomgroup[3] = False
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+    scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
 
-    # print('Saved data to CSV')
-    
-    # # Plotting
-    # if PLOTTING:
-    #     print('Plotting...')
-    #     fig, ax = plt.subplots(3, 1, sharex=False, figsize=(15, 8))
-    #     plotter = DDPGMetrics(data=f'{DATA_FOLDER}/{NOISE}.csv', show=False, title=f'{NOISE} added Noise', smooth=2)
-    #     plotter.plot_losses(ax=ax)
-    #     plt.tight_layout()
-    #     plt.show()
-    
+    frames = test_env.render(
+        traj,
+        camera="track",
+        scene_option=scene_option,
+        width=640,
+        height=480,
+    )
+
+    # media.show_video(frames, fps=fps, loop=False)
+    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
+    # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 biped_np.py
+    media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing.mp4', frames, fps=fps)
+    print('Video saved')
