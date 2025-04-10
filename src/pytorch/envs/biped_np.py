@@ -142,9 +142,13 @@ class Biped(gym.Env):
 
         # Post init.
         self._post_init()
-        self.reset_model()
+        self.reset()
         self.observation_space = Box(
             low=-np.inf, high=np.inf, shape=self.observation_size, dtype=np.float64
+        )
+        
+        self.action_space = Box(
+            low=-1.0, high=1.0, shape=(self.action_size, ), dtype=np.float64
         )
         
     def key_callback(self, keycode):
@@ -217,7 +221,7 @@ class Biped(gym.Env):
             )
         self._foot_linvel_sensor_adr = np.array(foot_linvel_sensor_adr)
 
-    def reset_model(self):
+    def reset(self, seed=None, options=None):
         # Setup initial states.
         qpos = self._init_q.copy()
         qvel = np.zeros(self._mj_model.nv)
@@ -261,7 +265,7 @@ class Biped(gym.Env):
         }
         observation = self._get_obs()
         mujoco.mj_step(self._mj_model, self.data)
-        return observation
+        return observation, {}
     
     def step(self, action: np.ndarray) -> tuple:
         # Apply action.
@@ -467,7 +471,6 @@ class Biped(gym.Env):
 
     @property
     def observation_size(self) -> tuple:
-        print(self._state.size)
         return (self._state.size, )
 
 
@@ -667,7 +670,7 @@ def render_array(
 if __name__ == "__main__":
 
     env = Biped(visualize=False)
-    env.reset_model()
+    env.reset()
 
     rollout = []
 
