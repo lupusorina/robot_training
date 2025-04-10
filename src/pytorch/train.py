@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import optim
-from ppo import Agent
+from agents.ppo import Agent
 import gymnasium as gym
 import pandas as pd
 import envs
@@ -90,7 +90,7 @@ def train_unroll(agent, env, observation, num_unrolls, unroll_length):
   return observation, td
 
 def train(
-    env_name: str = 'biped',
+    env_name: str = 'ant',
     num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
