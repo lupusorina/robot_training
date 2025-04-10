@@ -14,12 +14,20 @@ import torch
 from torch import optim
 from ppo import Agent
 import gymnasium as gym
+import pandas as pd
 
 import tqdm as tqdm
 
-FIGURE_FOLDER = 'figures'
-if not os.path.exists(FIGURE_FOLDER):
-  os.makedirs(FIGURE_FOLDER)
+RESULTS = 'results'
+if not os.path.exists(RESULTS):
+    os.makedirs(RESULTS)
+time_now = datetime.now().strftime('%Y%m%d-%H%M%S')
+if not os.path.exists(os.path.join(RESULTS, time_now)):
+    os.makedirs(os.path.join(RESULTS, time_now))
+FOLDER_RESULTS = os.path.join(RESULTS, time_now)
+ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
+FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
+print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
 StepData = collections.namedtuple(
     'StepData',
@@ -199,7 +207,7 @@ def train(
     
     # Save the model
     print(f'saving model at {total_steps}')
-    torch.save(agent.policy.state_dict(), 'logs/results/ppo_model_pytorch.pth')
+    torch.save(agent.policy.state_dict(), ABS_FOLDER_RESUlTS + '/ppo_model_pytorch.pth')
 
 def progress(num_steps, metrics):
   print(f'steps: {num_steps}, \
@@ -217,7 +225,11 @@ def progress(num_steps, metrics):
   plt.xlabel('# environment steps')
   plt.ylabel('reward per episode')
   plt.plot(xdata, ydata)
-  plt.savefig('ppo_training.png')
+  plt.savefig(ABS_FOLDER_RESUlTS + '/ppo_training.png')
+
+  # save to pandas df
+  df = pd.DataFrame({'x': xdata, 'y': ydata, 'eval_sps': eval_sps, 'train_sps': train_sps})
+  df.to_csv(ABS_FOLDER_RESUlTS + '/ppo_training.csv', index=False)
 
 # def progress(_, metrics):
 #   if 'training/sps' in metrics:
