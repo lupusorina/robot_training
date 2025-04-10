@@ -1,6 +1,3 @@
-#@title Import Brax and some helper modules
-
-# Envs.
 from biped_np import Biped
 
 from IPython.display import clear_output
@@ -10,15 +7,15 @@ from datetime import datetime
 import os
 import time
 from typing import Any, Callable, Dict, Optional
-from brax.envs.wrappers import training
 import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
 from torch import optim
 from ppo import Agent
+import gymnasium as gym
 
-from wrapper import VectorGymWrapper, TorchWrapper
+import tqdm as tqdm
 
 FIGURE_FOLDER = 'figures'
 if not os.path.exists(FIGURE_FOLDER):
@@ -39,23 +36,23 @@ def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
 
 
 def eval_unroll(idx, agent, env, length):
+  print('In eval unroll')
   """Return number of episodes and average reward for a single unroll."""
-  observation = env.reset()
+  observation, _ = env.reset()
+  observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
   observation_list = []
-  for _ in range(length):
+  for i in range(length):
     _, action = agent.get_logits_action(observation)
-    observation, reward, done, _, info = env.step(Agent.dist_postprocess(action))
+    observation, reward, done, _, info = env.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+    observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
+    done = torch.tensor(done, device=agent.device, dtype=torch.float32)
+    reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
     observation_list.append(observation)
-  # plot
-  obs_list = torch.stack(observation_list)
-  fig, ax = plt.subplots()
-  ax.plot(obs_list[:, :, 1].cpu().detach().numpy())
-  plt.savefig(f'{FIGURE_FOLDER}/ppo_eval_' + str(idx) + '.png')
-  
+  print('End of eval unroll')
   return episodes, episode_reward / episodes
 
 
@@ -63,64 +60,33 @@ def train_unroll(agent, env, observation, num_unrolls, unroll_length):
   """Return step data over multple unrolls."""
   sd = StepData([], [], [], [], [], [])
   for _ in range(num_unrolls):
+    # Convert initial observation to tensor
+    observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
     one_unroll = StepData([observation], [], [], [], [], [])
     for _ in range(unroll_length):
       logits, action = agent.get_logits_action(observation)
-      observation, reward, done, _, info = env.step(Agent.dist_postprocess(action))
+      observation, reward, done, truncation, info = env.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+      observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
+      reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
+      done = torch.tensor(done, device=agent.device, dtype=torch.float32)
+      truncation = torch.tensor(truncation, device=agent.device, dtype=torch.float32)
       one_unroll.observation.append(observation)
       one_unroll.logits.append(logits)
       one_unroll.action.append(action)
       one_unroll.reward.append(reward)
       one_unroll.done.append(done)
-      one_unroll.truncation.append(info['truncation'])
+      one_unroll.truncation.append(truncation)
     one_unroll = sd_map(torch.stack, one_unroll)
     sd = sd_map(lambda x, y: x + [y], sd, one_unroll)
   td = sd_map(torch.stack, sd)
   return observation, td
 
-
-def create(
-    env_name: str,
-    episode_length: int = 1000,
-    action_repeat: int = 1,
-    auto_reset: bool = True,
-    batch_size: Optional[int] = None,
-    **kwargs,
-):
-  """Creates an environment.
-
-  Args:
-    env_name: environment name string
-    episode_length: length of episode
-    action_repeat: how many repeated actions to take per environment step
-    auto_reset: whether to auto reset the environment after an episode is done
-    batch_size: the number of environments to batch together
-    **kwargs: keyword argments that get passed to the Env class constructor
-
-  Returns:
-    env: an environment
-  """
-  if env_name == 'biped':
-      env = Biped()
-      print("Training Biped")
-  else:
-      raise ValueError(f'Unknown environment: {env_name}')
-
-  if episode_length is not None:
-    env = training.EpisodeWrapper(env, episode_length, action_repeat) # Maintains episode step count and sets done at episode end.
-  if batch_size:
-    env = training.VmapWrapper(env, batch_size) # Vectorizes Brax env.
-  if auto_reset:
-    env = training.AutoResetWrapper(env) # automatically resets Brax envs that are done.
-  print(env.batch_size)
-  return env
-
 def train(
-    env_name: str = 'biped',
-    num_envs: int = 2048,
+    env_name: str = 'ant',
+    num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
-    num_timesteps: int = 10_000_000,
+    num_timesteps: int = 30_000_000,
     eval_frequency: int = 10,
     unroll_length: int = 5,
     batch_size: int = 1024,
@@ -133,17 +99,26 @@ def train(
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
   """Trains a policy via PPO."""
-  env = create(env_name, batch_size=num_envs,
-                episode_length=episode_length)
-  # env = VectorGymWrapper(env)
-  # env = TorchWrapper(env, device=device) # convert between jax ndarrays and torch tensors:
 
-  # env warmup
-  env.reset()
+  if env_name == 'ant':
+    env = gym.make_vec("Ant-v5",
+                     num_envs=num_envs,
+                     vectorization_mode="async", # Note sync is slow, so we use async
+                     wrappers=(gym.wrappers.TimeAwareObservation,))
+  elif env_name == 'pendulum':
+    env = gym.make_vec('Pendulum-v1',
+                       num_envs=num_envs,
+                       vectorization_mode="async", # Note sync is slow, so we use async
+                       wrappers=(gym.wrappers.TimeAwareObservation,))
+  else:
+    raise ValueError(f'Unknown environment: {env_name}')
+
+  # Env warmup.
+  obs, _ = env.reset()
   action = torch.zeros(env.action_space.shape).to(device)
-  env.step(action)
+  obs, reward, done, truncation, info = env.step(action.detach().cpu().numpy())
 
-  # create the agent
+  # Create the agent.
   policy_layers = [
       env.observation_space.shape[-1], 64, 64, env.action_space.shape[-1] * 2
   ]
@@ -179,7 +154,7 @@ def train(
     if eval_i == eval_frequency:
       break
 
-    observation = env.reset()
+    observation, _ = env.reset()
     num_steps = batch_size * num_minibatches * unroll_length
     num_epochs = num_timesteps // (num_steps * eval_frequency)
     num_unrolls = batch_size * num_minibatches // num_envs
@@ -227,7 +202,6 @@ def train(
     torch.save(agent.policy.state_dict(), 'logs/results/ppo_model_pytorch.pth')
 
 def progress(num_steps, metrics):
-  print('here')
   print(f'steps: {num_steps}, \
         reward: {metrics["eval/episode_reward"]}, \
         eval_sps: {metrics["speed/eval_sps"]}, \
