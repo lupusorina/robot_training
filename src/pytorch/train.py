@@ -1,4 +1,3 @@
-from biped_np import Biped
 
 from IPython.display import clear_output
 
@@ -15,6 +14,7 @@ from torch import optim
 from ppo import Agent
 import gymnasium as gym
 import pandas as pd
+import envs
 
 import tqdm as tqdm
 
@@ -90,7 +90,7 @@ def train_unroll(agent, env, observation, num_unrolls, unroll_length):
   return observation, td
 
 def train(
-    env_name: str = 'ant',
+    env_name: str = 'biped',
     num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
@@ -118,13 +118,15 @@ def train(
                        num_envs=num_envs,
                        vectorization_mode="async", # Note sync is slow, so we use async
                        wrappers=(gym.wrappers.TimeAwareObservation,))
-  else:
-    raise ValueError(f'Unknown environment: {env_name}')
+  elif env_name == 'biped':
+    env = gym.make_vec('Biped-custom',
+                   num_envs=num_envs,
+                   vectorization_mode="async", # Note sync is slow, so we use async
+                  #  wrappers=(gym.wrappers.TimeAwareObservation,)
+                   )
 
   # Env warmup.
-  obs, _ = env.reset()
-  action = torch.zeros(env.action_space.shape).to(device)
-  obs, reward, done, truncation, info = env.step(action.detach().cpu().numpy())
+  env.reset()
 
   # Create the agent.
   policy_layers = [
@@ -204,7 +206,7 @@ def train(
     total_steps += num_epochs * num_steps
     total_loss = total_loss / (num_epochs * num_update_epochs * num_minibatches)
     sps = num_epochs * num_steps / duration
-    
+
     # Save the model
     print(f'saving model at {total_steps}')
     torch.save(agent.policy.state_dict(), ABS_FOLDER_RESUlTS + '/ppo_model_pytorch.pth')
