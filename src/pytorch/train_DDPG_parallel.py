@@ -50,7 +50,8 @@ def eval_unroll(idx, agent, env, length):
   observation_list = []
   for i in range(length):
     _, action = agent.get_action(observation)
-    observation, reward, done, _, info = env.step(action.detach().cpu().numpy())
+    observation, reward, termination, truncation, info = env.step(action.detach().cpu().numpy())
+    done = np.logical_or(termination,truncation)
     observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
     done = torch.tensor(done, device=agent.device, dtype=torch.float32)
     reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
@@ -62,43 +63,37 @@ def eval_unroll(idx, agent, env, length):
 
 
 def train_unroll(agent, env, observation, num_unrolls, unroll_length):
-    """Collect experience and store in the replay buffer."""
-    print('in train unroll')
-    for _ in range(num_unrolls):
-        for _ in range(unroll_length):
-            # Convert observation to tensor
-            observation_tensor = torch.tensor(observation, device=agent.device, dtype=torch.float32)
-            
-            # Get action from policy
-            with torch.no_grad():
-              _, action = agent.get_action(observation_tensor)
-              noise = torch.normal(mean=0.0, std=0.02, size=action.shape, device=agent.device)
-              action_hat = action + noise
-            
-            # Execute action in environment
-            next_observation, reward, done, truncation, info = env.step(action_hat.cpu().numpy())
-            
-            # Convert to tensors
-            next_observation_tensor = torch.tensor(next_observation, device=agent.device, dtype=torch.float32)
-            reward_tensor = torch.tensor(reward, device=agent.device, dtype=torch.float32)
-            done_tensor = torch.tensor(done, device=agent.device, dtype=torch.float32)
-            truncation_tensor = torch.tensor(truncation, device=agent.device, dtype=torch.float32)
-            done_ = torch.logical_or(done_tensor, truncation_tensor).to(device=agent.device)
-            
-            # Store transition in replay buffer
-            for i in range(env.num_envs):
-                agent.memory.store(
-                    obs=observation_tensor[i,:], 
-                    act=action_hat[i,:], 
-                    reward=reward_tensor[i], 
-                    next_obs=next_observation_tensor[i,:], 
-                    done=done_[i]
-                )
-            
-            # Update observation
-            observation = next_observation
+    """Collect experience and store in the replay buffer. Only one step per env
+    as in baseline ddpg"""
+    # print('in train unroll')
+    observation_tensor = torch.tensor(observation, device=agent.device, dtype=torch.float32)
     
-    return observation
+    # Get action from policy
+    with torch.no_grad():
+        _, action = agent.get_action(observation_tensor)
+        noise = torch.normal(mean=0.0, std=0.02, size=action.shape, device=agent.device)
+        action_hat = action + noise
+    
+    # Execute action in environment
+    next_observation, reward, done, truncation, info = env.step(action_hat.cpu().numpy())
+    # Convert to tensors
+    next_observation_tensor = torch.tensor(next_observation, device=agent.device, dtype=torch.float32)
+    reward_tensor = torch.tensor(reward, device=agent.device, dtype=torch.float32)
+    done_tensor = torch.tensor(done, device=agent.device, dtype=torch.float32)
+    truncation_tensor = torch.tensor(truncation, device=agent.device, dtype=torch.float32)
+    done_ = torch.logical_or(done_tensor, truncation_tensor).to(device=agent.device)
+    
+    # Store transition in replay buffer
+    for i in range(env.num_envs):
+        agent.memory.store(
+            obs=observation_tensor[i,:], 
+            act=action_hat[i,:], 
+            reward=reward_tensor[i], 
+            next_obs=next_observation_tensor[i,:], 
+            done=done_[i]
+        )
+    
+    return next_observation, done_ #return last new observation after step as well as done_ tensor --> is episode from each env over? need to reset that env
 
 
 def train(
@@ -140,7 +135,7 @@ def train(
     observation, _ = env.reset()
     obs_dim = env.observation_space.shape[-1]
     act_dim = env.action_space.shape[-1]
-    act_lim = 1.0  # hard coded for now for the ant
+    act_lim = 2.0  # hard coded for now for the ant
     
     buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, max_sz=max_memory, device=device)
     
@@ -169,11 +164,8 @@ def train(
         if progress_fn:
             t = time.time()
             with torch.no_grad():
-                print('start_eval')
                 episode_count, episode_reward = eval_unroll(eval_i, agent, env, episode_length)
-                print(episode_count)
-                print(episode_reward)
-                
+
             duration = time.time() - t
             episode_avg_length = num_envs * episode_length / episode_count
             eval_sps = num_envs * episode_length / duration if duration > 0 else 0
@@ -199,43 +191,47 @@ def train(
         total_p_loss = 0
         t = time.time()
         
-        for _ in range(num_epochs):
+        for i in range(250):
             # Collect data
-            observation = train_unroll(agent, env, observation, num_unrolls, unroll_length)
-            # print('Experience collection complete')
+            observation_, done_ = train_unroll(agent, env, observation, num_unrolls, unroll_length)
+            # print('Experience collection complete'
             
-            # Update networks
-            # for _ in range(num_update_epochs):
-            #     for _ in range(num_minibatches):
-                    # Update critic
-            
-            critic_optimizer.zero_grad()
-            train_data_batch = agent.memory.sample_batch(batch_sz=batch_size)
-            v_loss = agent.critic_loss(train_data_batch)
-            v_loss.backward()
-            critic_optimizer.step()
-            total_v_loss += v_loss.detach()
-            # print('Value loss:', v_loss.item())
-            critic_optimizer.zero_grad()
-            
-            # Update actor
-            actor_optimizer.zero_grad()
-            p_loss = agent.policy_loss(train_data_batch)
-            p_loss.backward()
-            actor_optimizer.step()
-            total_p_loss += p_loss.detach()
-            # print('Policy loss:', p_loss.item())
-            actor_optimizer.zero_grad()
+            if agent.memory.sz_buf[0] > batch_size:
+               #once enough transitions stored, can train
+                critic_optimizer.zero_grad()
+                train_data_batch = agent.memory.sample_batch(batch_sz=batch_size)
+                v_loss = agent.critic_loss(train_data_batch)
+                v_loss.backward()
+                critic_optimizer.step()
+                total_v_loss += v_loss.detach()
+                # print('Value loss:', v_loss.item())
+                critic_optimizer.zero_grad()
+                
+                # Update actor
+                actor_optimizer.zero_grad()
+                p_loss = agent.policy_loss(train_data_batch)
+                p_loss.backward()
+                actor_optimizer.step()
+                total_p_loss += p_loss.detach()
+                # print('Policy loss:', p_loss.item())
+                actor_optimizer.zero_grad()
 
-            # Soft update target networks
-            with torch.no_grad():
-              for params, target_params in zip(agent.value_b.parameters(), agent.value_t.parameters()):
-                target_params.data.copy_(agent.tau*params.data + (1.0-agent.tau) * target_params.data)
+                # Soft update target networks
+                with torch.no_grad():
+                    for params, target_params in zip(agent.value_b.parameters(), agent.value_t.parameters()):
+                        target_params.data.copy_(agent.tau*params.data + (1.0-agent.tau) * target_params.data)
 
-              for params, target_params in zip(agent.policy_b.parameters(), agent.policy_t.parameters()):
-                target_params.data.copy_(agent.tau*params.data + (1.0-agent.tau) * target_params.data)
-            # print("soft update of target netwroks")
-            # print('Update cycle complete')
+                    for params, target_params in zip(agent.policy_b.parameters(), agent.policy_t.parameters()):
+                        target_params.data.copy_(agent.tau*params.data + (1.0-agent.tau) * target_params.data)
+                    # print("soft update of target netwroks")
+                    # print('Update cycle complete')
+            
+            if done_.any(): # reset only envs that have a done flag active
+                env_idx = done_.nonzero().squeeze().cpu().numpy()
+                reset_observation,_ = env.reset()
+                observation_[env_idx] = reset_observation[env_idx]
+                
+            observation = observation_    
         
         duration = time.time() - t
         total_steps += num_epochs * num_steps
