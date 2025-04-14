@@ -19,6 +19,9 @@ import matplotlib.pyplot as plt
 import argparse
 import json
 
+import os
+from moviepy.video.io import ImageSequenceClip
+
 class OrnsteinUhlenbeckNoise:
     def __init__(self,theta: float,sigma: float,base_scale: float,mean: float = 0,std: float = 1) -> None:
         super().__init__()
@@ -219,16 +222,17 @@ if __name__ == '__main__':
 
     DEFAULT_PARAMS_PENDULUM = {
         'noise': 'Gaussian',
-        'training_steps': 1000,
+        'training_steps': 30_000,
         'warm_up': 0,
         'discount_factor': 0.99,
         'buffer_length': 15000,
         'batch_size': 100,
     }
+    DEFAULT_PARAMS_ANT = DEFAULT_PARAMS_PENDULUM
 
     parser = argparse.ArgumentParser(description='Train DDPG on a given environment')
-    parser.add_argument('--env_name', type=str, default='pendulum',
-                      choices=['ant', 'pendulum', 'biped'],
+    parser.add_argument('--env_name', type=str, default='Ant-v5',
+                      choices=['Ant-v5', 'Pendulum-v1', 'biped'],
                       help='Name of the environment to train on')
     parser.add_argument('--nb_training_cycles', type=int, default=1,
                         help='Number of training cycles')
@@ -236,8 +240,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.env_name == 'biped':
         params = DEFAULT_PARAMS_BIPED
-    elif args.env_name == 'pendulum':
+    elif args.env_name == 'Pendulum-v1':
         params = DEFAULT_PARAMS_PENDULUM
+    elif args.env_name == 'Ant-v5':
+        params = DEFAULT_PARAMS_ANT
     else:
         raise ValueError(f"Environment {args.env_name} not supported")
     
@@ -271,8 +277,8 @@ if __name__ == '__main__':
     else:
         raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
 
-    if ENV_NAME == 'pendulum':
-        env = gym.make('Pendulum-v1')
+    if ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+        env = gym.make(ENV_NAME)
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
         action_low = env.action_space.low
@@ -283,6 +289,7 @@ if __name__ == '__main__':
         action_dim = env.action_size
         action_low = env._soft_q_j_min
         action_high = env._soft_q_j_max
+
 
     env.reset()
 
@@ -303,8 +310,8 @@ if __name__ == '__main__':
         target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
 
         models = [behavior_policy, behavior_q]
-        # for model in models:
-        #     init_model_weights(model, seed=seed) # Sorina: I don't think this is needed
+        for model in models:
+            init_model_weights(model, seed=seed) # Sorina: I don't think this is needed
 
         target_policy.load_state_dict(behavior_policy.state_dict())
         target_q.load_state_dict(behavior_q.state_dict())
@@ -375,11 +382,30 @@ if __name__ == '__main__':
 
     ### Testing the policy.
 
+    def run_test(env_name):
+        test_env = gym.make(env_name, render_mode='rgb_array')
+        test_env.reset()
+
+        frames = []
+        obs, _= env.reset()
+        for _ in range(200):
+            action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+            action = action.detach().numpy()
+            obs, reward, terminated, truncated, info = test_env.step(action)
+            frames.append(test_env.render())
+        test_env.close()
+
+        video_path = os.path.join(ABS_FOLDER_RESUlTS, f"{env_name}_video.mp4")
+        clip = ImageSequenceClip.ImageSequenceClip(frames, fps=30)
+        clip.write_videofile(video_path, codec="libx264")
+        print(f"Saved video for episode")
+
     # Load the policy.
     policy_path = f'{ABS_FOLDER_RESUlTS}/policy_0.pth'
     behavior_policy.load_state_dict(torch.load(policy_path, map_location=device, weights_only=True))
     behavior_policy.eval()
 
+    # Run the test.
     if ENV_NAME == 'biped':
         test_env = Biped(visualize=False)
         obs, _ = test_env.reset()
@@ -423,19 +449,9 @@ if __name__ == '__main__':
         )
 
         # media.show_video(frames, fps=fps, loop=False)
-        # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
         # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 train_DDPG.py
         media.write_video(f'{ABS_FOLDER_RESUlTS}/behaviour_robot_after_training.mp4', frames, fps=fps)
         print('Video saved')
 
-    elif ENV_NAME == 'pendulum':
-        print('Pendulum environment')
-        test_env = gym.make('Pendulum-v1', render_mode='human')
-        test_env.reset()
-        for i in range(1000):
-            action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-            action = action.detach().numpy()
-            obs, rewards, done, _, _ = test_env.step(action)
-            test_env.render()
-            print(f'obs: {obs}, rewards: {rewards}, done: {done}')
-
+    elif ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+        run_test(env_name=ENV_NAME)
