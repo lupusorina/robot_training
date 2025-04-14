@@ -430,8 +430,8 @@ if __name__ == '__main__':
 
     elif ENV_NAME == 'pendulum':
         print('Pendulum environment')
-        test_env = gym.make('Pendulum-v1', render_mode='rgb_array')
-        obs, _ = test_env.reset()
+        test_env = gym.make('Pendulum-v1', render_mode='human')
+        test_env.reset()
         for i in range(1000):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
             action = action.detach().numpy()
