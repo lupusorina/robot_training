@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch.nn.functional as functional
 from torch.distributions import Normal
 
-from biped_np import *
+from envs.biped_np import *
 
 from tqdm import tqdm
 import os
@@ -217,19 +217,28 @@ if __name__ == '__main__':
         noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
     else:
         raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
-    
-    env = Biped(visualize=False)
-    env.reset_model()
 
-    state_dim = env.observation_size[0]
-    action_dim = env.action_size
+    env_name = 'pendulum'
+    if env_name == 'pendulum':
+        env = gym.make('Pendulum-v1')
+        state_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        action_low = env.action_space.low
+        action_high = env.action_space.high
+    elif env_name == 'biped':
+        env = Biped(visualize=False)
+        state_dim = env.observation_size[0]
+        action_dim = env.action_size
+        action_low = env._soft_q_j_min
+        action_high = env._soft_q_j_max
+
+    env.reset()
+
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
 
-    action_low = env._soft_q_j_min
-    action_high = env._soft_q_j_max
     print(f"Action low: {action_low}, Action high: {action_high}")
 
-    training_steps = 30000
+    training_steps = 1000
     warm_up = 0
     discount_gamma = 0.99
     buffer_length = 15000
@@ -263,7 +272,7 @@ if __name__ == '__main__':
         memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
 
 
-        obs = env.reset_model()
+        obs, _ = env.reset()
         episodic_returns = []
         cumulative_reward = 0
 
@@ -291,7 +300,7 @@ if __name__ == '__main__':
                 episodic_returns.append(cumulative_reward.item())
                 print('Reward: ', cumulative_reward.item())
                 cumulative_reward = 0
-                obs = env.reset_model()
+                obs, _ = env.reset()
             else:
                 obs = obs_.copy()
 
@@ -319,48 +328,69 @@ if __name__ == '__main__':
         # Save the behaviour policy.
         torch.save(behavior_policy.state_dict(), f'{ABS_FOLDER_RESUlTS}/policy_{cycles}.pth')
 
-    # Test the policy.
-    env = None
+    ### Testing the policy.
 
-    test_env = Biped()
-    obs = test_env.reset_model()
-    rollout = []
-    for _ in tqdm(range(10000)):
-        # action = np.random.uniform(-1, 1, test_env.action_size)
-        with torch.no_grad():
+    # Load the policy.
+    policy_path = f'{ABS_FOLDER_RESUlTS}/policy_0.pth'
+    behavior_policy.load_state_dict(torch.load(policy_path, map_location=device, weights_only=True))
+    behavior_policy.eval()
+
+    if env_name == 'pendulum':
+        test_env = gym.make('Pendulum-v1', render_mode='human')
+    elif env_name == 'biped':
+        test_env = Biped(visualize=False)
+    obs, _ = test_env.reset()
+
+    if env_name == 'biped':
+        rollout = []
+        for _ in tqdm(range(10000)):
+            # action = np.random.uniform(-1, 1, test_env.action_size)
+            with torch.no_grad():
+                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+                action = action.cpu().numpy()
+            action = np.clip(action, a_min=action_low, a_max=action_high)
+            obs, rewards, done, _, _ = test_env.step(action)
+
+            state = {
+                'qpos': test_env.data.qpos.copy(),
+                'qvel': test_env.data.qvel.copy(),
+                'xfrc_applied': test_env.data.xfrc_applied.copy()
+            }
+            rollout.append(state)
+
+            if done:
+                print('Robot fell down')
+                break
+
+        render_every = 1 # int.
+        fps = 1/ test_env.sim_dt / render_every
+        traj = rollout[::render_every]
+
+        scene_option = mujoco.MjvOption()
+        scene_option.geomgroup[2] = True
+        scene_option.geomgroup[3] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+        frames = test_env.render(
+            traj,
+            camera="track",
+            scene_option=scene_option,
+            width=640,
+            height=480,
+        )
+
+        # media.show_video(frames, fps=fps, loop=False)
+        # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
+        # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 train_DDPG.py
+        media.write_video(f'{ABS_FOLDER_RESUlTS}/behaviour_robot_after_training.mp4', frames, fps=fps)
+        print('Video saved')
+
+    elif env_name == 'pendulum':
+        print('Pendulum environment')
+        for i in range(1000):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-            action = action.cpu().numpy()
-        action = np.clip(action, a_min=action_low, a_max=action_high)
-        obs, rewards, done, _, _ = test_env.step(action)
+            obs, rewards, done, _, _ = test_env.step(action)
+            print(f'obs: {obs}, rewards: {rewards}, done: {done}')
 
-        state = {
-            'qpos': test_env.data.qpos.copy(),
-            'qvel': test_env.data.qvel.copy(),
-            'xfrc_applied': test_env.data.xfrc_applied.copy()
-        }
-        rollout.append(state)
-
-    render_every = 1 # int.
-    fps = 1/ test_env.sim_dt / render_every
-    traj = rollout[::render_every]
-
-    scene_option = mujoco.MjvOption()
-    scene_option.geomgroup[2] = True
-    scene_option.geomgroup[3] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
-
-    frames = test_env.render(
-        traj,
-        camera="track",
-        scene_option=scene_option,
-        width=640,
-        height=480,
-    )
-
-    # media.show_video(frames, fps=fps, loop=False)
-    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
-    # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 biped_np.py
-    media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing.mp4', frames, fps=fps)
-    print('Video saved')
