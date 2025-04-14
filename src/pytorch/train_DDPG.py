@@ -16,6 +16,9 @@ from datetime import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import argparse
+import json
+
 class OrnsteinUhlenbeckNoise:
     def __init__(self,theta: float,sigma: float,base_scale: float,mean: float = 0,std: float = 1) -> None:
         super().__init__()
@@ -35,16 +38,16 @@ class OrnsteinUhlenbeckNoise:
         return self.base_scale * self.state
   
 class DDPGMemory:
-    def __init__(self, state_dim:int, action_dim:int, buffer_length:int):
-        self.memory_buffer_length = buffer_length
+    def __init__(self, state_dim:int, action_dim:int, BUFFER_LENGTH:int):
+        self.memory_BUFFER_LENGTH = BUFFER_LENGTH
         self.ptr = 0
         self.size = 0
 
-        self.states = np.zeros((buffer_length, state_dim), dtype=np.float32)
-        self.actions = np.zeros((buffer_length, action_dim), dtype=np.float32)
-        self.rewards = np.zeros((buffer_length, 1), dtype=np.float32)
-        self.next_states = np.zeros((buffer_length, state_dim), dtype=np.float32)
-        self.dones = np.zeros((buffer_length, 1), dtype=np.float32)
+        self.states = np.zeros((BUFFER_LENGTH, state_dim), dtype=np.float32)
+        self.actions = np.zeros((BUFFER_LENGTH, action_dim), dtype=np.float32)
+        self.rewards = np.zeros((BUFFER_LENGTH, 1), dtype=np.float32)
+        self.next_states = np.zeros((BUFFER_LENGTH, state_dim), dtype=np.float32)
+        self.dones = np.zeros((BUFFER_LENGTH, 1), dtype=np.float32)
 
     def add_sample(self, state, action, reward, next_state, done):
         idx = self.ptr
@@ -54,11 +57,11 @@ class DDPGMemory:
         self.next_states[idx] = next_state
         self.dones[idx] = done
         
-        self.ptr = (self.ptr + 1) % self.memory_buffer_length
-        self.size = min(self.size + 1, self.memory_buffer_length)
+        self.ptr = (self.ptr + 1) % self.memory_BUFFER_LENGTH
+        self.size = min(self.size + 1, self.memory_BUFFER_LENGTH)
     
-    def sample_memory(self, batch_size):
-        indices = np.random.randint(0, self.size, size=batch_size)
+    def sample_memory(self, BATCH_SIZE):
+        indices = np.random.randint(0, self.size, size=BATCH_SIZE)
         return (
             torch.tensor(self.states[indices], dtype=torch.float32),
             torch.tensor(self.actions[indices], dtype=torch.float32),
@@ -135,7 +138,7 @@ class DDPG:
             target_param.data.copy_(tau * source_param.data + (1.0 - tau) * target_param.data)
 
 
-    def train(self,memory_buffer:DDPGMemory, batch_size:int, epochs:int):
+    def train(self,memory_buffer:DDPGMemory, BATCH_SIZE:int, epochs:int):
 
         models = [self.pi, self.pi_t, self.q, self.q_t]
         for model in models:
@@ -143,7 +146,7 @@ class DDPG:
         
         for epoch in range(epochs):
             # sample a batch from memory
-            sampled_states, sampled_actions, sampled_rewards, sampled_next_states, sampled_dones = memory_buffer.sample_memory(batch_size)
+            sampled_states, sampled_actions, sampled_rewards, sampled_next_states, sampled_dones = memory_buffer.sample_memory(BATCH_SIZE)
 
             sampled_states = sampled_states.to(self.device)
             sampled_actions = sampled_actions.to(self.device)
@@ -202,15 +205,65 @@ ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
 FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-NB_TRAINING_CYCLES = 1
-NOISE = 'OrnsteinUhlenbeck' # 'Gaussian' or 'OrnsteinUhlenbeck'
-PLOTTING = False
 
 if __name__ == '__main__':
+
+    DEFAULT_PARAMS_BIPED = {
+        'noise': 'OrnsteinUhlenbeck',
+        'training_steps': 1000,
+        'warm_up': 0,
+        'discount_factor': 0.99,
+        'buffer_length': 15000,
+        'batch_size': 100,
+    }
+
+    DEFAULT_PARAMS_PENDULUM = {
+        'noise': 'Gaussian',
+        'training_steps': 1000,
+        'warm_up': 0,
+        'discount_factor': 0.99,
+        'buffer_length': 15000,
+        'batch_size': 100,
+    }
+
+    parser = argparse.ArgumentParser(description='Train DDPG on a given environment')
+    parser.add_argument('--env_name', type=str, default='pendulum',
+                      choices=['ant', 'pendulum', 'biped'],
+                      help='Name of the environment to train on')
+    parser.add_argument('--nb_training_cycles', type=int, default=1,
+                        help='Number of training cycles')
+
+    args = parser.parse_args()
+    if args.env_name == 'biped':
+        params = DEFAULT_PARAMS_BIPED
+    elif args.env_name == 'pendulum':
+        params = DEFAULT_PARAMS_PENDULUM
+    else:
+        raise ValueError(f"Environment {args.env_name} not supported")
     
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+    for key, value in params.items():
+        print(f"{key}: {value}")
+
+    # Save the arguments in a file.
+    with open(os.path.join(ABS_FOLDER_RESUlTS, 'args.json'), 'w') as f:
+        json.dump(args.__dict__, f)
+    with open(os.path.join(ABS_FOLDER_RESUlTS, 'params.json'), 'w') as f:
+        json.dump(params, f)
+
+    ENV_NAME = args.env_name
+    NOISE = params['noise']
+    TRAINING_STEPS = params['training_steps']
+    WARM_UP = params['warm_up']
+    DISCOUNT_FACTOR = params['discount_factor']
+    BUFFER_LENGTH = params['buffer_length']
+    BATCH_SIZE = params['batch_size']
+    NB_TRAINING_CYCLES = args.nb_training_cycles
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
     if NOISE == 'Gaussian':
         noise = Normal(loc=0, scale=0.2)
     elif NOISE == 'OrnsteinUhlenbeck':
@@ -218,14 +271,13 @@ if __name__ == '__main__':
     else:
         raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
 
-    env_name = 'pendulum'
-    if env_name == 'pendulum':
+    if ENV_NAME == 'pendulum':
         env = gym.make('Pendulum-v1')
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
         action_low = env.action_space.low
         action_high = env.action_space.high
-    elif env_name == 'biped':
+    elif ENV_NAME == 'biped':
         env = Biped(visualize=False)
         state_dim = env.observation_size[0]
         action_dim = env.action_size
@@ -235,14 +287,7 @@ if __name__ == '__main__':
     env.reset()
 
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
-
     print(f"Action low: {action_low}, Action high: {action_high}")
-
-    training_steps = 1000
-    warm_up = 0
-    discount_gamma = 0.99
-    buffer_length = 15000
-    batch_size = 100
 
     list_of_all_the_data = []
 
@@ -267,16 +312,16 @@ if __name__ == '__main__':
 
         agent = DDPG(policy_network=behavior_policy, target_policy=target_policy,
                     value_network=behavior_q, target_value_function=target_q,
-                    discount_factor=discount_gamma, seed=seed, device=device)
+                    discount_factor=DISCOUNT_FACTOR, seed=seed, device=device)
 
-        memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
+        memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, BUFFER_LENGTH=BUFFER_LENGTH)
 
 
         obs, _ = env.reset()
         episodic_returns = []
         cumulative_reward = 0
 
-        for t in tqdm(range(training_steps), desc=f"Cycle {cycles+1}", unit="step"):
+        for t in tqdm(range(TRAINING_STEPS), desc=f"Cycle {cycles+1}", unit="step"):
             with torch.no_grad():
                 action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
                 expl_noise = noise.sample(action.shape)
@@ -293,8 +338,8 @@ if __name__ == '__main__':
                 
                 memory.add_sample(state=obs, action=noisy_action, reward=reward, next_state=obs_, done=done)
 
-            if t>=warm_up and len(memory.states) >= batch_size:
-                agent.train(memory_buffer=memory, batch_size=batch_size,epochs=1)
+            if t>=WARM_UP and len(memory.states) >= BATCH_SIZE:
+                agent.train(memory_buffer=memory, BATCH_SIZE=BATCH_SIZE,epochs=1)
             
             if done:
                 episodic_returns.append(cumulative_reward.item())
@@ -335,13 +380,13 @@ if __name__ == '__main__':
     behavior_policy.load_state_dict(torch.load(policy_path, map_location=device, weights_only=True))
     behavior_policy.eval()
 
-    if env_name == 'pendulum':
+    if ENV_NAME == 'pendulum':
         test_env = gym.make('Pendulum-v1', render_mode='human')
-    elif env_name == 'biped':
+    elif ENV_NAME == 'biped':
         test_env = Biped(visualize=False)
     obs, _ = test_env.reset()
 
-    if env_name == 'biped':
+    if ENV_NAME == 'biped':
         rollout = []
         for _ in tqdm(range(10000)):
             # action = np.random.uniform(-1, 1, test_env.action_size)
@@ -387,7 +432,7 @@ if __name__ == '__main__':
         media.write_video(f'{ABS_FOLDER_RESUlTS}/behaviour_robot_after_training.mp4', frames, fps=fps)
         print('Video saved')
 
-    elif env_name == 'pendulum':
+    elif ENV_NAME == 'pendulum':
         print('Pendulum environment')
         for i in range(1000):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
