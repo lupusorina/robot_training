@@ -380,13 +380,9 @@ if __name__ == '__main__':
     behavior_policy.load_state_dict(torch.load(policy_path, map_location=device, weights_only=True))
     behavior_policy.eval()
 
-    if ENV_NAME == 'pendulum':
-        test_env = gym.make('Pendulum-v1', render_mode='human')
-    elif ENV_NAME == 'biped':
-        test_env = Biped(visualize=False)
-    obs, _ = test_env.reset()
-
     if ENV_NAME == 'biped':
+        test_env = Biped(visualize=False)
+        obs, _ = test_env.reset()
         rollout = []
         for _ in tqdm(range(10000)):
             # action = np.random.uniform(-1, 1, test_env.action_size)
@@ -434,8 +430,12 @@ if __name__ == '__main__':
 
     elif ENV_NAME == 'pendulum':
         print('Pendulum environment')
+        test_env = gym.make('Pendulum-v1', render_mode='rgb_array')
+        obs, _ = test_env.reset()
         for i in range(1000):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+            action = action.detach().numpy()
             obs, rewards, done, _, _ = test_env.step(action)
+            test_env.render()
             print(f'obs: {obs}, rewards: {rewards}, done: {done}')
 
