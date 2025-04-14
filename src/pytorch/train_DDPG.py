@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch.nn.functional as functional
 from torch.distributions import Normal
 
-from biped_np import *
+from envs.biped_np import *
 from MLE_train import ContinuousActionNN
 
 from tqdm import tqdm
@@ -213,7 +213,7 @@ PLOTTING = False
 if __name__ == '__main__':
     
     env = Biped(visualize=False)
-    env.reset_model()
+    env.reset()
 
     state_dim = env.observation_size[0]
     action_dim = env.action_size
@@ -262,7 +262,7 @@ if __name__ == '__main__':
         memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
 
 
-        obs = env.reset_model()
+        obs,_ = env.reset()
         episodic_returns = []
         cumulative_reward = 0
         print( "... Training Starts ...")
@@ -291,9 +291,9 @@ if __name__ == '__main__':
             
             if done:
                 episodic_returns.append(cumulative_reward.item())
-                print('Reward: ', cumulative_reward.item())
+                print('Cumulative Reward: ', cumulative_reward.item())
                 cumulative_reward = 0
-                obs = env.reset_model()
+                obs,_ = env.reset()
             else:
                 obs = obs_.copy()
 
@@ -325,7 +325,7 @@ if __name__ == '__main__':
     env = None
 
     test_env = Biped()
-    obs = test_env.reset_model()
+    obs,_ = test_env.reset()
     rollout = []
     for _ in tqdm(range(10000)):
         # action = np.random.uniform(-1, 1, test_env.action_size)
