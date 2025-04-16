@@ -10,10 +10,10 @@ class Agent(nn.Module):
   def __init__(self,
                policy_layers: Sequence[int],
                value_layers: Sequence[int],
-               entropy_cost: float,
-               discounting: float,
-               reward_scaling: float,
-               device: str):
+               entropy_cost: float = 0.01,
+               discounting: float = 0.99,
+               reward_scaling: float = 1.0,
+               device: str = 'cpu'):
     super(Agent, self).__init__()
 
     policy = []
