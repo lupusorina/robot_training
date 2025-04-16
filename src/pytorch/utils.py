@@ -28,10 +28,14 @@ def get_collision_info_np(
   """Get the distance and normal of the collision between two geoms."""
   mask = (np.array([geom1, geom2]) == contact.geom).all(axis=1)
   mask |= (np.array([geom2, geom1]) == contact.geom).all(axis=1)
+
+  # If no contacts found, return a large distance and zero normal
+  if not np.any(mask):
+    return np.array(1e4), np.zeros(3)
+
   idx = np.where(mask, contact.dist, 1e4).argmin()
   dist = contact.dist[idx] * mask[idx]
-  print(contact.frame[idx, 0, :3])
-  normal = (dist < 0) * contact.frame[idx, 0, :3]
+  normal = (dist < 0) * contact.frame[idx, :3]
   return dist, normal
 
 def geoms_colliding_np(state,
