@@ -22,8 +22,14 @@ pip3 install -e .
 cd src/jax
 python3 train.py
 ```
-
 Inference: test.ipynb
+
+## Run biped training DDPG
+
+```
+cd src/pytorch
+MUJOCO_GL=egl python3 train_DDPG.py
+```
 
 ## File structure
 
