@@ -90,7 +90,7 @@ def train_unroll(agent, env, observation, num_unrolls, unroll_length):
   return observation, td
 
 def train(
-    env_name: str = 'ant',
+    env_name: str = 'pendulum',
     num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
