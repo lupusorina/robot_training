@@ -101,8 +101,8 @@ def train_unroll(agent: Agent, privileged_obs: torch.Tensor, env: gym.Env, num_u
   return td
 
 def train(
-    env_name: str = 'pendulum',
-    num_envs: int = 10,
+    env_name: str = 'biped',
+    num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
     num_timesteps: int = 30_000_000,
@@ -152,8 +152,8 @@ def train(
   print("Observation size: ", obs_size)
 
   # Create the agent.
-  policy_layers = [obs_size, 64, 64, env.action_space.shape[-1] * 2]
-  value_layers = [privileged_obs.shape[-1], 64, 64, 1]
+  policy_layers = [obs_size, 512, 256, 128, env.action_space.shape[-1] * 2]
+  value_layers = [privileged_obs.shape[-1], 512, 256, 128, 1]
 
   agent = Agent(policy_layers, value_layers, entropy_cost, discounting,
                 reward_scaling, device)
@@ -251,7 +251,7 @@ def progress(num_steps, metrics):
   train_sps.append(metrics['speed/sps'])
   clear_output(wait=True)
   plt.xlim([0, 30_000_000])
-  plt.ylim([0, 2000])
+  # plt.ylim([0, 2000])
   plt.xlabel('# environment steps')
   plt.ylabel('reward per episode')
   plt.plot(xdata, ydata)
