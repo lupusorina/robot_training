@@ -1,19 +1,20 @@
 """
-  Joystick task for Berkeley Humanoid using Numpy
-  Modified by Sorina Lupu (eslupu@caltech.edu)
+    Joystick task for the Caltech Biped.
+    Modified by Sorina Lupu (eslupu@caltech.edu)
 """
 
 from typing import Any, Dict, Optional, Union, List, Callable, Sequence
 from ml_collections import config_dict
 import mujoco
 import gymnasium as gym
-from gymnasium import utils as gym_utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
 import mujoco.viewer
 
 import numpy as np
 
+import sys
+sys.path.append("../")
 import utils as utils
 from utils import geoms_colliding_np, get_rz_np
 import tqdm
@@ -21,10 +22,31 @@ import tqdm
 import mediapy as media
 
 
+NAME_ROBOT = 'biped'
+if NAME_ROBOT == 'biped':
+    import src.assets.biped.config as robot_config
+else:
+    raise ValueError(f'NAME_ROBOT must be "biped"')
+
+XML_PATH = robot_config.XML_PATH
+ROOT_BODY = robot_config.ROOT_BODY
+FEET_SITES = robot_config.FEET_SITES
+FEET_GEOMS = robot_config.FEET_GEOMS
+GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
+GLOBAL_LINVEL_SENSOR = robot_config.GLOBAL_LINVEL_SENSOR
+GLOBAL_ANGVEL_SENSOR = robot_config.GLOBAL_ANGVEL_SENSOR
+LOCAL_LINVEL_SENSOR = robot_config.LOCAL_LINVEL_SENSOR
+ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
+GYRO_SENSOR = robot_config.GYRO_SENSOR
+IMU_SITE = robot_config.IMU_SITE
+HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
+DESIRED_HEIGHT = robot_config.DESIRED_HEIGHT
+
+
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
       ctrl_dt=0.02,
-      sim_dt=0.002,
+      sim_dt=0.001,
       episode_length=1000,
       action_scale=0.5,
       soft_joint_pos_limit_factor=0.95,
@@ -73,36 +95,17 @@ def default_config() -> config_dict.ConfigDict:
           ),
           tracking_sigma=0.5,
           max_foot_height=0.1,
-          base_height_target=0.5,
+          base_height_target=DESIRED_HEIGHT,
       ),
       push_config=config_dict.create(
           enable=True,
           interval_range=[5.0, 10.0],
-          magnitude_range=[0.1, 2.0],
+          magnitude_range=[0.05, 0.4],
       ),
-      lin_vel_x=[-1.0, 1.0],
-      lin_vel_y=[-1.0, 1.0],
-      ang_vel_yaw=[-1.0, 1.0],
+      lin_vel_x=[-0.5, 0.5],
+      lin_vel_y=[-0.5, 0.5],
+      ang_vel_yaw=[-0.5, 0.5],
   )
-
-NAME_ROBOT = 'biped'
-if NAME_ROBOT == 'biped':
-    import src.assets.biped.config as robot_config
-else:
-    raise ValueError(f'NAME_ROBOT must be "biped"')
-
-XML_PATH = robot_config.XML_PATH
-ROOT_BODY = robot_config.ROOT_BODY
-FEET_SITES = robot_config.FEET_SITES
-FEET_GEOMS = robot_config.FEET_GEOMS
-GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
-GLOBAL_LINVEL_SENSOR = robot_config.GLOBAL_LINVEL_SENSOR
-GLOBAL_ANGVEL_SENSOR = robot_config.GLOBAL_ANGVEL_SENSOR
-LOCAL_LINVEL_SENSOR = robot_config.LOCAL_LINVEL_SENSOR
-ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
-GYRO_SENSOR = robot_config.GYRO_SENSOR
-IMU_SITE = robot_config.IMU_SITE
-HIP_JOINT_NAMES = robot_config.HIP_JOINT_NAMES
 
 
 class Biped(gym.Env):
@@ -144,9 +147,9 @@ class Biped(gym.Env):
         self._post_init()
         self.reset()
         self.observation_space = Box(
-            low=-np.inf, high=np.inf, shape=self.observation_size, dtype=np.float64
-        )
-        
+            low=-np.inf, high=np.inf, shape=self.privileged_observation_size, dtype=np.float64
+        ) # HACK. TODO: fix
+
         self.action_space = Box(
             low=-1.0, high=1.0, shape=(self.action_size, ), dtype=np.float64
         )
@@ -204,7 +207,8 @@ class Biped(gym.Env):
             self._faa_indices = np.array(faa_indices) # For faa reward deviation.
             q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
         self._q_j_noise_scale = np.array(q_j_noise_scale)
-
+    
+        # Initialize the site and geom ids.        
         self._imu_site_id = self._mj_model.site(IMU_SITE).id
         self._torso_body_id = self._mj_model.body(ROOT_BODY).id
         self._feet_site_id = np.array([self._mj_model.site(name).id for name in FEET_SITES])
@@ -263,10 +267,16 @@ class Biped(gym.Env):
             "push_step": 0,
             # "push_interval_steps": push_interval_steps
         }
-        observation = self._get_obs()
+        priviliged_observation = self._get_priviliged_obs(contact=np.zeros(2))
         mujoco.mj_step(self._mj_model, self.data)
-        return observation, {}
-    
+        return priviliged_observation, {}
+
+    def get_privileged_observation(self):
+        return self._privileged_state
+
+    def get_observation(self):
+        return self._state
+
     def step(self, action: np.ndarray) -> tuple:
         # Apply action.
         motor_targets = self._default_q_joints + action * self._config.action_scale
@@ -278,17 +288,16 @@ class Biped(gym.Env):
             mujoco.mj_step(self._mj_model, self.data)
 
         # Check contacts. TODO: fix this
-        # contact = np.array([
-        #     geoms_colliding_np(self.data, geom_id, self._floor_geom_id)
-        #     for geom_id in self._feet_geom_id
-        # ])
-        contact = np.zeros(2, dtype=bool)
+        contact = np.array([
+            geoms_colliding_np(self.data, geom_id, self._floor_geom_id)
+            for geom_id in self._feet_geom_id
+        ])
         contact_filt = contact | self.info["last_contact"]
         first_contact = (self.info["feet_air_time"] > 0.0) * contact_filt
         self.info["feet_air_time"] += self.ctrl_dt
         p_f = self.data.site_xpos[self._feet_site_id]
         p_fz = p_f[..., -1]
-        # self.info["swing_peak"] = np.max(self.info["swing_peak"], p_fz)
+        self.info["swing_peak"] = np.maximum(self.info["swing_peak"], p_fz)
 
         # Visualize.
         if self.visualize_mujoco is True:
@@ -296,7 +305,7 @@ class Biped(gym.Env):
                 self.viewer.sync()
 
         # Get obs.
-        obs = self._get_obs()
+        priviliged_observation = self._get_priviliged_obs(contact=contact)
         done = self._get_termination()
 
         rewards = self._get_rew(done=done,
@@ -331,9 +340,9 @@ class Biped(gym.Env):
         self.info["swing_peak"] *= ~contact
 
         # return observation, reward, terminated, False, info
-        return obs, reward, done, False, self.info
+        return priviliged_observation, reward, done, False, self.info
     
-    def _get_obs(self) -> np.ndarray:
+    def _get_priviliged_obs(self, contact: np.ndarray) -> np.ndarray:
         """ Get observation from sensors. """
         # Gyroscope.
         gyro = self.get_sensor_data(GYRO_SENSOR)
@@ -367,13 +376,34 @@ class Biped(gym.Env):
             noisy_gyro,             # 3
             noisy_gravity,          # 3
             self.info["command"],   # 3
-            noisy_joint_angles - self._default_q_joints,  # 12
-            noisy_joint_vel,        # 12
-            self.info["last_act"],  # 12
+            noisy_joint_angles - self._default_q_joints,  # 10
+            noisy_joint_vel,        # 10
+            self.info["last_act"],  # 10
             phase,                  # 4
-        ]) # 52
+        ]) # 46
 
-        return self._state
+        accelerometer = self.get_sensor_data(ACCELEROMETER_SENSOR)
+        global_angvel = self.get_sensor_data(GLOBAL_ANGVEL_SENSOR)
+        feet_vel = self.data.sensordata[self._foot_linvel_sensor_adr].ravel()
+        root_height = self.data.qpos[2]
+
+        self._privileged_state = np.hstack([
+            self._state,
+            gyro,  # 3
+            accelerometer,  # 3
+            gravity,  # 3
+            linvel,  # 3
+            global_angvel,  # 3
+            joint_angles - self._default_q_joints,
+            joint_vel,
+            root_height,  # 1
+            self.data.actuator_force,  # 10
+            contact,  # 2
+            feet_vel,  # 4*3
+            self.info["feet_air_time"],  # 2
+        ])
+
+        return self._privileged_state
 
     def sample_command(self, rng=None) -> np.ndarray:
         if rng is None:
@@ -418,11 +448,11 @@ class Biped(gym.Env):
             "orientation": self._cost_orientation(self.get_sensor_data(GRAVITY_SENSOR)),
             "base_height": self._cost_base_height(self.data.qpos[2]),
             # Energy related rewards.
-            "torques": self._cost_torques(self.data.actuator_force.copy()),
+            "torques": self._cost_torques(self.data.actuator_force),
             "action_rate": self._cost_action_rate(
                 action, self.info["last_act"], self.info["last_last_act"]
             ),
-            "energy": self._cost_energy(self.data.qvel[6:].copy(), self.data.actuator_force.copy()),
+            "energy": self._cost_energy(self.data.qvel[6:], self.data.actuator_force),
             # Feet related rewards.
             "feet_slip": self._cost_feet_slip(self.data, contact, self.info),
             "feet_clearance": self._cost_feet_clearance(self.data, self.info),
@@ -441,14 +471,14 @@ class Biped(gym.Env):
             # Other rewards.
             "alive": self._reward_alive(),
             "termination": self._cost_termination(done),
-            "stand_still": self._cost_stand_still(self.info["command"], self.data.qpos[7:].copy()),
+            "stand_still": self._cost_stand_still(self.info["command"], self.data.qpos[7:]),
             # Pose related rewards.
             "joint_deviation_hip": self._cost_joint_deviation_hip(
-                self.data.qpos[7:].copy(), self.info["command"]
+                self.data.qpos[7:], self.info["command"]
             ),
-            "joint_deviation_knee": self._cost_joint_deviation_knee(self.data.qpos[7:].copy()),
-            "dof_pos_limits": self._cost_joint_pos_limits(self.data.qpos[7:].copy()),
-            "pose": self._cost_joint_angles(self.data.qpos[7:].copy()),
+            "joint_deviation_knee": self._cost_joint_deviation_knee(self.data.qpos[7:]),
+            "dof_pos_limits": self._cost_joint_pos_limits(self.data.qpos[7:]),
+            "pose": self._cost_joint_angles(self.data.qpos[7:]),
         }
 
     def _get_termination(self):
@@ -472,10 +502,12 @@ class Biped(gym.Env):
     @property
     def observation_size(self) -> tuple:
         return (self._state.size, )
-
+    
+    @property
+    def privileged_observation_size(self) -> tuple:
+        return (self._privileged_state.size, )
 
     # Tracking rewards.
-
     def _reward_tracking_lin_vel(self, commands: np.ndarray, local_vel: np.ndarray, ) -> np.ndarray:
         lin_vel_error = np.sum(np.square(commands[:2] - local_vel[:2]))
         return np.exp(-lin_vel_error / self._config.reward_config.tracking_sigma)
@@ -677,13 +709,14 @@ if __name__ == "__main__":
     for _ in tqdm.tqdm(range(1000)):
         # action = np.random.uniform(-1, 1, env.action_size)
         action = np.zeros(env.action_size)
-        obs, rewards, done, _, _ = env.step(action)
+        obs_dict, rewards, done, _, _ = env.step(action)
         state = {
             'qpos': env.data.qpos.copy(),
             'qvel': env.data.qvel.copy(),
             'xfrc_applied': env.data.xfrc_applied.copy()
         }
         rollout.append(state)
+        print(env.info["last_contact"])
 
     render_every = 1 # int.
     fps = 1/ env.sim_dt / render_every
