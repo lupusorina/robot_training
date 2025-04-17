@@ -13,6 +13,8 @@ from skrl.trainers.torch import SequentialTrainer
 from skrl.utils import set_seed
 import gymnasium as gym
 
+from moviepy.video.io import ImageSequenceClip
+
 # seed for reproducibility
 set_seed()  # e.g. `set_seed(42)` for fixed seed
 
@@ -57,11 +59,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
 env = gym.make('Ant-v5')
 
 # wrap the environment
-env = wrap_env(env)  # or 'env = wrap_env(env, wrapper="gymnasium")'
-
-# # load and wrap the Isaac Gym environment
-# env = load_isaacgym_env_preview4(task_name="Ant")
-# env = wrap_env(env)
+env = wrap_env(env, wrapper="gymnasium")  # or 'env = wrap_env(env, wrapper="gymnasium")'
 
 device = env.device
 
@@ -136,5 +134,29 @@ print(f"Loading the model from {path}")
 checkpoints_folder = os.path.join(path, "checkpoints")
 agent.load(os.path.join(checkpoints_folder, "best_agent.pt"))
 
-# Start evaluation.
-trainer.eval()
+# Define environment.
+env = gym.make("Ant-v5", render_mode='rgb_array')
+obs_size = env.observation_space.shape[0]
+privileged_obs_size = env.observation_space.shape[0]
+print(f'Observation size: {obs_size}')
+print(f'Privileged observation size: {privileged_obs_size}')
+print(f'Action size: {env.action_space.shape[-1]}')
+
+# Test policy.
+out = env.reset()
+obs = out[0]
+frames = []
+
+for i in range(1000):
+    obs_tensor = torch.tensor(obs, dtype=torch.float32)
+    actions, log_prob, outputs = agent.policy.act({"states": obs_tensor}, role="policy")
+    obs, reward, done, truncation, info = env.step(actions.detach().numpy())
+
+    frames.append(env.render())
+
+env.close()
+
+video_path = os.path.join(path, 'test_video.mp4')
+clip = ImageSequenceClip.ImageSequenceClip(frames, fps=30)
+clip.write_videofile(video_path, codec="libx264")
+print(f"Saved video!")
