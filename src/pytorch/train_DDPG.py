@@ -74,10 +74,11 @@ class DDPGMemory:
         )    
 
 class Policy(nn.Module):
-    def __init__(self, state_dim, action_dim, policy_lr=4e-4, device='cpu'):
+    def __init__(self, state_dim, action_dim, action_lim=1.0, policy_lr=4e-4, device='cpu'):
         super().__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
+        self.action_lim = torch.tensor(action_lim, dtype=torch.float32, device=device)
 
         self.linear_layer_1 = nn.Linear(self.state_dim, 400)
         self.linear_layer_2 = nn.Linear(400, 300)
@@ -90,7 +91,7 @@ class Policy(nn.Module):
         x = functional.relu(self.linear_layer_1(inputs))
         x = functional.relu(self.linear_layer_2(x))
         
-        return 2 * torch.tanh(self.action_layer(x))
+        return self.action_lim * torch.tanh(self.action_layer(x))
 
 class Value(nn.Module):
     def __init__(self, state_dim, action_dim, value_lr=4e-3, device='cpu'):
@@ -303,8 +304,8 @@ if __name__ == '__main__':
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3, device=device)
-        target_policy = Policy(state_dim=state_dim, action_dim=action_dim, policy_lr=1e-3, device=device)
+        behavior_policy = Policy(state_dim=state_dim, action_dim=action_dim, action_lim=action_high, policy_lr=1e-3, device=device)
+        target_policy = Policy(state_dim=state_dim, action_dim=action_dim, action_lim=action_high, policy_lr=1e-3, device=device)
 
         behavior_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
         target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
