@@ -68,6 +68,13 @@ class ContinuousActionNN(nn.Module):
         mu = self.mu_head(x)
         log_sigma = self.log_sigma_head(x)
         return mu, log_sigma
+    
+    def sample(self, input):
+        mu, log_sigma = self.forward(input)
+        sigma = torch.exp(log_sigma) + 1e-5
+        dist = torch.distributions.Normal(mu, sigma) # Add small value to avoid case where sigma is zero
+        action = dist.sample()
+        return action ,mu, sigma
 
 def gaussian_nll_loss(mu, log_std, target):
     std = torch.exp(log_std)
@@ -155,6 +162,7 @@ def train_mle_with_val(model: ContinuousActionNN,
             print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {avg_loss:.4f} || Val Loss: {val_loss:.4f}")
 
     return train_losses, val_losses
+
 
 
 
