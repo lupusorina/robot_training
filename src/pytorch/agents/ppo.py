@@ -33,6 +33,10 @@ class Agent(nn.Module):
     self.num_steps = torch.zeros((), device=device)
     self.running_mean = torch.zeros(policy_layers[0], device=device)
     self.running_variance = torch.zeros(policy_layers[0], device=device)
+    
+    self.num_steps_privileged = torch.zeros((), device=device)
+    self.running_mean_privileged = torch.zeros(value_layers[0], device=device)
+    self.running_variance_privileged = torch.zeros(value_layers[0], device=device)
 
     self.entropy_cost = entropy_cost
     self.discounting = discounting
@@ -87,10 +91,26 @@ class Agent(nn.Module):
     self.running_variance = self.running_variance + var_diff
 
   @torch.jit.export
+  def update_normalization_privileged(self, privileged_observation):
+    self.num_steps_privileged += privileged_observation.shape[0] * privileged_observation.shape[1]
+    input_to_old_mean_privileged = privileged_observation - self.running_mean_privileged
+    mean_diff_privileged = torch.sum(input_to_old_mean_privileged / self.num_steps_privileged, dim=(0, 1))
+    self.running_mean_privileged = self.running_mean_privileged + mean_diff_privileged
+    input_to_new_mean_privileged = privileged_observation - self.running_mean_privileged
+    var_diff_privileged = torch.sum(input_to_new_mean_privileged * input_to_old_mean_privileged, dim=(0, 1))
+    self.running_variance_privileged = self.running_variance_privileged + var_diff_privileged
+
+  @torch.jit.export
   def normalize(self, observation):
     variance = self.running_variance / (self.num_steps + 1.0)
     variance = torch.clip(variance, 1e-6, 1e6)
     return ((observation - self.running_mean) / variance.sqrt()).clip(-5, 5)
+
+  @torch.jit.export
+  def normalize_privileged(self, privileged_observation):
+    variance = self.running_variance_privileged / (self.num_steps_privileged + 1.0)
+    variance = torch.clip(variance, 1e-6, 1e6)
+    return ((privileged_observation - self.running_mean_privileged) / variance.sqrt()).clip(-5, 5)
 
   @torch.jit.export
   def get_logits_action(self, observation):
@@ -130,8 +150,9 @@ class Agent(nn.Module):
   @torch.jit.export
   def loss(self, td: Dict[str, torch.Tensor]):
     observation = self.normalize(td['observation'])
+    privileged_observation = self.normalize_privileged(td['privileged_observation'])
     policy_logits = self.policy(observation[:-1])
-    baseline = self.value(observation)
+    baseline = self.value(privileged_observation)
     baseline = torch.squeeze(baseline, dim=-1)
 
     # Use last baseline value (from the value function) to bootstrap.

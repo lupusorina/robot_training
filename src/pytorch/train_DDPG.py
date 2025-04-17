@@ -8,7 +8,6 @@ import torch.nn.functional as functional
 from torch.distributions import Normal
 
 from envs.biped_np import *
-from MLE_train import ContinuousActionNN
 
 from tqdm import tqdm
 import os
@@ -16,6 +15,12 @@ from datetime import datetime
 
 import pandas as pd
 import matplotlib.pyplot as plt
+
+import argparse
+import json
+
+import os
+from moviepy.video.io import ImageSequenceClip
 
 class OrnsteinUhlenbeckNoise:
     def __init__(self,theta: float,sigma: float,base_scale: float,mean: float = 0,std: float = 1) -> None:
@@ -36,16 +41,16 @@ class OrnsteinUhlenbeckNoise:
         return self.base_scale * self.state
   
 class DDPGMemory:
-    def __init__(self, state_dim:int, action_dim:int, buffer_length:int):
-        self.memory_buffer_length = buffer_length
+    def __init__(self, state_dim:int, action_dim:int, BUFFER_LENGTH:int):
+        self.memory_BUFFER_LENGTH = BUFFER_LENGTH
         self.ptr = 0
         self.size = 0
 
-        self.states = np.zeros((buffer_length, state_dim), dtype=np.float32)
-        self.actions = np.zeros((buffer_length, action_dim), dtype=np.float32)
-        self.rewards = np.zeros((buffer_length, 1), dtype=np.float32)
-        self.next_states = np.zeros((buffer_length, state_dim), dtype=np.float32)
-        self.dones = np.zeros((buffer_length, 1), dtype=np.float32)
+        self.states = np.zeros((BUFFER_LENGTH, state_dim), dtype=np.float32)
+        self.actions = np.zeros((BUFFER_LENGTH, action_dim), dtype=np.float32)
+        self.rewards = np.zeros((BUFFER_LENGTH, 1), dtype=np.float32)
+        self.next_states = np.zeros((BUFFER_LENGTH, state_dim), dtype=np.float32)
+        self.dones = np.zeros((BUFFER_LENGTH, 1), dtype=np.float32)
 
     def add_sample(self, state, action, reward, next_state, done):
         idx = self.ptr
@@ -55,11 +60,11 @@ class DDPGMemory:
         self.next_states[idx] = next_state
         self.dones[idx] = done
         
-        self.ptr = (self.ptr + 1) % self.memory_buffer_length
-        self.size = min(self.size + 1, self.memory_buffer_length)
+        self.ptr = (self.ptr + 1) % self.memory_BUFFER_LENGTH
+        self.size = min(self.size + 1, self.memory_BUFFER_LENGTH)
     
-    def sample_memory(self, batch_size):
-        indices = np.random.randint(0, self.size, size=batch_size)
+    def sample_memory(self, BATCH_SIZE):
+        indices = np.random.randint(0, self.size, size=BATCH_SIZE)
         return (
             torch.tensor(self.states[indices], dtype=torch.float32),
             torch.tensor(self.actions[indices], dtype=torch.float32),
@@ -136,7 +141,7 @@ class DDPG:
             target_param.data.copy_(tau * source_param.data + (1.0 - tau) * target_param.data)
 
 
-    def train(self,memory_buffer:DDPGMemory, batch_size:int, epochs:int):
+    def train(self,memory_buffer:DDPGMemory, BATCH_SIZE:int, epochs:int):
 
         models = [self.pi, self.pi_t, self.q, self.q_t]
         for model in models:
@@ -144,7 +149,7 @@ class DDPG:
         
         for epoch in range(epochs):
             # sample a batch from memory
-            sampled_states, sampled_actions, sampled_rewards, sampled_next_states, sampled_dones = memory_buffer.sample_memory(batch_size)
+            sampled_states, sampled_actions, sampled_rewards, sampled_next_states, sampled_dones = memory_buffer.sample_memory(BATCH_SIZE)
 
             sampled_states = sampled_states.to(self.device)
             sampled_actions = sampled_actions.to(self.device)
@@ -203,36 +208,93 @@ ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
 FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-NB_TRAINING_CYCLES = 1
-NOISE = 'OrnsteinUhlenbeck' # 'Gaussian' or 'OrnsteinUhlenbeck'
-PLOTTING = False
 
 if __name__ == '__main__':
+
+    DEFAULT_PARAMS_BIPED = {
+        'noise': 'OrnsteinUhlenbeck',
+        'training_steps': 1000,
+        'warm_up': 0,
+        'discount_factor': 0.99,
+        'buffer_length': 15000,
+        'batch_size': 100,
+    }
+
+    DEFAULT_PARAMS_PENDULUM = {
+        'noise': 'Gaussian',
+        'training_steps': 30_000,
+        'warm_up': 0,
+        'discount_factor': 0.99,
+        'buffer_length': 15000,
+        'batch_size': 100,
+    }
+    DEFAULT_PARAMS_ANT = DEFAULT_PARAMS_PENDULUM
+
+    parser = argparse.ArgumentParser(description='Train DDPG on a given environment')
+    parser.add_argument('--env_name', type=str, default='Ant-v5',
+                      choices=['Ant-v5', 'Pendulum-v1', 'biped'],
+                      help='Name of the environment to train on')
+    parser.add_argument('--nb_training_cycles', type=int, default=1,
+                        help='Number of training cycles')
+
+    args = parser.parse_args()
+    if args.env_name == 'biped':
+        params = DEFAULT_PARAMS_BIPED
+    elif args.env_name == 'Pendulum-v1':
+        params = DEFAULT_PARAMS_PENDULUM
+    elif args.env_name == 'Ant-v5':
+        params = DEFAULT_PARAMS_ANT
+    else:
+        raise ValueError(f"Environment {args.env_name} not supported")
     
-    env = Biped(visualize=False)
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+    for key, value in params.items():
+        print(f"{key}: {value}")
+
+    # Save the arguments in a file.
+    with open(os.path.join(ABS_FOLDER_RESUlTS, 'args.json'), 'w') as f:
+        json.dump(args.__dict__, f)
+    with open(os.path.join(ABS_FOLDER_RESUlTS, 'params.json'), 'w') as f:
+        json.dump(params, f)
+
+    ENV_NAME = args.env_name
+    NOISE = params['noise']
+    TRAINING_STEPS = params['training_steps']
+    WARM_UP = params['warm_up']
+    DISCOUNT_FACTOR = params['discount_factor']
+    BUFFER_LENGTH = params['buffer_length']
+    BATCH_SIZE = params['batch_size']
+    NB_TRAINING_CYCLES = args.nb_training_cycles
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    if NOISE == 'Gaussian':
+        noise = Normal(loc=0, scale=0.2)
+    elif NOISE == 'OrnsteinUhlenbeck':
+        noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
+    else:
+        raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
+
+    if ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+        env = gym.make(ENV_NAME)
+        state_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        action_low = env.action_space.low
+        action_high = env.action_space.high
+    elif ENV_NAME == 'biped': #is this is ok for action clipping?
+        env = Biped(visualize=False)
+        state_dim = env.observation_size[0]
+        action_dim = env.action_size
+        action_low = env._soft_q_j_min
+        action_high = env._soft_q_j_max
+
+
     env.reset()
 
-    state_dim = env.observation_size[0]
-    action_dim = env.action_size
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
-
-    mle_weight_path = 'MLE_model/P(a|s).pth'
-    expert = ContinuousActionNN(state_dim=state_dim,action_dim=action_dim)
-    expert.load_state_dict(torch.load(mle_weight_path, map_location=device, weights_only=True))
-    expert.eval()
-
-    action_low = env._soft_q_j_min
-    action_high = env._soft_q_j_max
     print(f"Action low: {action_low}, Action high: {action_high}")
-
-    training_steps = 30000
-    warm_up = 0
-    discount_gamma = 0.99
-    buffer_length = 15000
-    batch_size = 100
 
     list_of_all_the_data = []
 
@@ -248,8 +310,8 @@ if __name__ == '__main__':
         target_q = Value(state_dim=state_dim, action_dim=action_dim, value_lr=1e-3, device=device)
 
         models = [behavior_policy, behavior_q]
-        # for model in models:
-        #     init_model_weights(model, seed=seed) # Sorina: I don't think this is needed
+        for model in models:
+            init_model_weights(model, seed=seed) # Sorina: I don't think this is needed
 
         target_policy.load_state_dict(behavior_policy.state_dict())
         target_q.load_state_dict(behavior_q.state_dict())
@@ -257,28 +319,27 @@ if __name__ == '__main__':
 
         agent = DDPG(policy_network=behavior_policy, target_policy=target_policy,
                     value_network=behavior_q, target_value_function=target_q,
-                    discount_factor=discount_gamma, seed=seed, device=device)
+                    discount_factor=DISCOUNT_FACTOR, seed=seed, device=device)
 
-        memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, buffer_length=buffer_length)
+        memory = DDPGMemory(state_dim=state_dim, action_dim=action_dim, BUFFER_LENGTH=BUFFER_LENGTH)
 
 
-        obs,_ = env.reset()
+        obs, _ = env.reset()
         episodic_returns = []
         cumulative_reward = 0
-        print( "... Training Starts ...")
-        for t in tqdm(range(training_steps), desc=f"Cycle {cycles+1}", unit="step"):
+
+        for t in tqdm(range(TRAINING_STEPS), desc=f"Cycle {cycles+1}", unit="step"):
             with torch.no_grad():
-                robot_state = torch.tensor(obs, dtype=torch.float32, device=device)
-                # print(f"Robot state: {robot_state.shape}")
-                action = behavior_policy.forward(robot_state)
-                expert_action,_ = expert(robot_state)
+                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+                expert_action = noise.sample(action.shape)
                 # print(expert_action)
                 noisy_action = action.cpu().numpy() + expert_action.cpu().numpy()
                 
                 # TODO: clip needs to be done differently, considering also qpos_joints
-                # clipped_action = np.clip(noisy_action,
-                #                             a_min=action_low,
-                #                             a_max=action_high)
+                if ENV_NAME != 'biped': 
+                    noisy_action = np.clip(noisy_action,
+                                                a_min=action_low,
+                                                a_max=action_high)
 
                 obs_, reward, termination, truncation, _ = env.step(noisy_action)
                 done = termination or truncation
@@ -286,14 +347,14 @@ if __name__ == '__main__':
                 
                 memory.add_sample(state=obs, action=noisy_action, reward=reward, next_state=obs_, done=done)
 
-            if t>=warm_up and len(memory.states) >= batch_size:
-                agent.train(memory_buffer=memory, batch_size=batch_size,epochs=1)
+            if t>=WARM_UP and len(memory.states) >= BATCH_SIZE:
+                agent.train(memory_buffer=memory, BATCH_SIZE=BATCH_SIZE,epochs=1)
             
             if done:
                 episodic_returns.append(cumulative_reward.item())
                 print('Cumulative Reward: ', cumulative_reward.item())
                 cumulative_reward = 0
-                obs,_ = env.reset()
+                obs, _ = env.reset()
             else:
                 obs = obs_.copy()
 
@@ -321,48 +382,78 @@ if __name__ == '__main__':
         # Save the behaviour policy.
         torch.save(behavior_policy.state_dict(), f'{ABS_FOLDER_RESUlTS}/policy_{cycles}.pth')
 
-    # Test the policy.
-    env = None
+    ### Testing the policy.
 
-    test_env = Biped()
-    obs,_ = test_env.reset()
-    rollout = []
-    for _ in tqdm(range(10000)):
-        # action = np.random.uniform(-1, 1, test_env.action_size)
-        with torch.no_grad():
+    def run_test(env_name):
+        test_env = gym.make(env_name, render_mode='rgb_array')
+        test_env.reset()
+
+        frames = []
+        obs, _= env.reset()
+        for _ in range(200):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-            action = action.cpu().numpy()
-        action = np.clip(action, a_min=action_low, a_max=action_high)
-        obs, rewards, done, _, _ = test_env.step(action)
+            action = action.detach().numpy()
+            obs, reward, terminated, truncated, info = test_env.step(action)
+            frames.append(test_env.render())
+        test_env.close()
 
-        state = {
-            'qpos': test_env.data.qpos.copy(),
-            'qvel': test_env.data.qvel.copy(),
-            'xfrc_applied': test_env.data.xfrc_applied.copy()
-        }
-        rollout.append(state)
+        video_path = os.path.join(ABS_FOLDER_RESUlTS, f"{env_name}_video.mp4")
+        clip = ImageSequenceClip.ImageSequenceClip(frames, fps=30)
+        clip.write_videofile(video_path, codec="libx264")
+        print(f"Saved video for episode")
 
-    render_every = 1 # int.
-    fps = 1/ test_env.sim_dt / render_every
-    traj = rollout[::render_every]
+    # Load the policy.
+    policy_path = f'{ABS_FOLDER_RESUlTS}/policy_0.pth'
+    behavior_policy.load_state_dict(torch.load(policy_path, map_location=device, weights_only=True))
+    behavior_policy.eval()
 
-    scene_option = mujoco.MjvOption()
-    scene_option.geomgroup[2] = True
-    scene_option.geomgroup[3] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+    # Run the test.
+    if ENV_NAME == 'biped':
+        test_env = Biped(visualize=False)
+        obs, _ = test_env.reset()
+        rollout = []
+        for _ in tqdm(range(10000)):
+            # action = np.random.uniform(-1, 1, test_env.action_size)
+            with torch.no_grad():
+                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+                action = action.cpu().numpy()
+            action = np.clip(action, a_min=action_low, a_max=action_high)
+            obs, rewards, done, _, _ = test_env.step(action)
 
-    frames = test_env.render(
-        traj,
-        camera="track",
-        scene_option=scene_option,
-        width=640,
-        height=480,
-    )
+            state = {
+                'qpos': test_env.data.qpos.copy(),
+                'qvel': test_env.data.qvel.copy(),
+                'xfrc_applied': test_env.data.xfrc_applied.copy()
+            }
+            rollout.append(state)
 
-    # media.show_video(frames, fps=fps, loop=False)
-    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
-    # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 biped_np.py
-    media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing.mp4', frames, fps=fps)
-    print('Video saved')
+            if done:
+                print('Robot fell down')
+                break
+
+        render_every = 1 # int.
+        fps = 1/ test_env.sim_dt / render_every
+        traj = rollout[::render_every]
+
+        scene_option = mujoco.MjvOption()
+        scene_option.geomgroup[2] = True
+        scene_option.geomgroup[3] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+        frames = test_env.render(
+            traj,
+            camera="track",
+            scene_option=scene_option,
+            width=640,
+            height=480,
+        )
+
+        # media.show_video(frames, fps=fps, loop=False)
+        # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 train_DDPG.py
+        media.write_video(f'{ABS_FOLDER_RESUlTS}/behaviour_robot_after_training.mp4', frames, fps=fps)
+        print('Video saved')
+
+    elif ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+        run_test(env_name=ENV_NAME)

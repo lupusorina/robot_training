@@ -1,4 +1,3 @@
-
 from IPython.display import clear_output
 
 import collections
@@ -14,7 +13,6 @@ from torch import optim
 from agents.ppo import Agent
 import gymnasium as gym
 import pandas as pd
-import envs
 
 import tqdm as tqdm
 
@@ -31,7 +29,7 @@ print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
 StepData = collections.namedtuple(
     'StepData',
-    ('observation', 'logits', 'action', 'reward', 'done', 'truncation'))
+    ('observation', 'privileged_observation', 'logits', 'action', 'reward', 'done', 'truncation'))
 
 
 def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
@@ -43,42 +41,55 @@ def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
   return StepData(**items)
 
 
-def eval_unroll(idx, agent, env, length):
+def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: int):
   print('In eval unroll')
   """Return number of episodes and average reward for a single unroll."""
-  observation, _ = env.reset()
-  observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
+  output_reset = envs.reset()
+  privileged_obs = output_reset[0]
+
+  # Get the observation from the privileged observation (first part)
+  obs = privileged_obs[:, :obs_size].copy()
+  obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
-  observation_list = []
-  for i in range(length):
-    _, action = agent.get_logits_action(observation)
-    observation, reward, done, _, info = env.step(Agent.dist_postprocess(action).detach().cpu().numpy())
-    observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
+
+  for _ in range(length):
+    _, action = agent.get_logits_action(obs)
+    privileged_obs, reward, done, _, _ = envs.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+    obs = privileged_obs[:, :obs_size].copy()
+    assert obs.all() == privileged_obs.all()
+    obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
     done = torch.tensor(done, device=agent.device, dtype=torch.float32)
     reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
-    observation_list.append(observation)
+
   print('End of eval unroll')
   return episodes, episode_reward / episodes
 
 
-def train_unroll(agent, env, observation, num_unrolls, unroll_length):
+def train_unroll(agent: Agent, privileged_obs: torch.Tensor, env: gym.Env, num_unrolls: int, unroll_length: int, obs_size: int):
   """Return step data over multple unrolls."""
-  sd = StepData([], [], [], [], [], [])
+  sd = StepData([], [], [], [], [], [], [])
   for _ in range(num_unrolls):
-    # Convert initial observation to tensor
-    observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
-    one_unroll = StepData([observation], [], [], [], [], [])
+
+    obs = privileged_obs[:, :obs_size]
+    obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
+    privileged_obs = torch.tensor(privileged_obs, device=agent.device, dtype=torch.float32)
+
+    one_unroll = StepData([obs], [privileged_obs], [], [], [], [], [])
     for _ in range(unroll_length):
-      logits, action = agent.get_logits_action(observation)
-      observation, reward, done, truncation, info = env.step(Agent.dist_postprocess(action).detach().cpu().numpy())
-      observation = torch.tensor(observation, device=agent.device, dtype=torch.float32)
+      logits, action = agent.get_logits_action(obs)
+      privileged_obs, reward, done, truncation, _ = env.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+      obs = privileged_obs[:, :obs_size].copy()
+      obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
+      privileged_obs = torch.tensor(privileged_obs, device=agent.device, dtype=torch.float32)
+
       reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
       done = torch.tensor(done, device=agent.device, dtype=torch.float32)
       truncation = torch.tensor(truncation, device=agent.device, dtype=torch.float32)
-      one_unroll.observation.append(observation)
+      one_unroll.observation.append(obs)
+      one_unroll.privileged_observation.append(privileged_obs)
       one_unroll.logits.append(logits)
       one_unroll.action.append(action)
       one_unroll.reward.append(reward)
@@ -87,10 +98,10 @@ def train_unroll(agent, env, observation, num_unrolls, unroll_length):
     one_unroll = sd_map(torch.stack, one_unroll)
     sd = sd_map(lambda x, y: x + [y], sd, one_unroll)
   td = sd_map(torch.stack, sd)
-  return observation, td
+  return td
 
 def train(
-    env_name: str = 'ant',
+    env_name: str = 'biped',
     num_envs: int = 256,
     episode_length: int = 1000,
     device: str = 'cuda',
@@ -109,30 +120,41 @@ def train(
   """Trains a policy via PPO."""
 
   if env_name == 'ant':
-    env = gym.make_vec("Ant-v5",
+    env = gym.make("Ant-v5")
+    envs = gym.make_vec("Ant-v5",
                      num_envs=num_envs,
                      vectorization_mode="async", # Note sync is slow, so we use async
-                     wrappers=(gym.wrappers.TimeAwareObservation,))
+                     )
+    obs_size = env.observation_space.shape[-1]
   elif env_name == 'pendulum':
-    env = gym.make_vec('Pendulum-v1',
+    env = gym.make("Pendulum-v1")
+    envs = gym.make_vec('Pendulum-v1',
                        num_envs=num_envs,
                        vectorization_mode="async", # Note sync is slow, so we use async
-                       wrappers=(gym.wrappers.TimeAwareObservation,))
+                       )
+    obs_size = env.observation_space.shape[-1]
   elif env_name == 'biped':
-    env = gym.make_vec('Biped-custom',
+    from envs.biped_np import Biped
+    env = Biped()
+    envs = gym.make_vec('Biped-custom',
                    num_envs=num_envs,
                    vectorization_mode="async", # Note sync is slow, so we use async
-                  #  wrappers=(gym.wrappers.TimeAwareObservation,)
                    )
+    obs_size = env.observation_size[0]
+
+  print("Using env: ", env_name)
 
   # Env warmup.
-  env.reset()
+  output_reset = envs.reset() # NOTE: only the biped env is using privileged observation
+  privileged_obs = output_reset[0]
+  privileged_obs_size = envs.observation_space.shape[-1]
+  print("Privileged observation size: ", privileged_obs_size)
+  print("Observation size: ", obs_size)
 
   # Create the agent.
-  policy_layers = [
-      env.observation_space.shape[-1], 64, 64, env.action_space.shape[-1] * 2
-  ]
-  value_layers = [env.observation_space.shape[-1], 64, 64, 1]
+  policy_layers = [obs_size, 512, 256, 128, env.action_space.shape[-1] * 2]
+  value_layers = [privileged_obs.shape[-1], 512, 256, 128, 1]
+
   agent = Agent(policy_layers, value_layers, entropy_cost, discounting,
                 reward_scaling, device)
   agent = torch.jit.script(agent.to(device))
@@ -146,7 +168,7 @@ def train(
     if progress_fn:
       t = time.time()
       with torch.no_grad():
-        episode_count, episode_reward = eval_unroll(eval_i, agent, env, episode_length)
+        episode_count, episode_reward = eval_unroll(eval_i, agent, envs, episode_length, obs_size)
       duration = time.time() - t
       # TODO: only count stats from completed episodes
       episode_avg_length = num_envs * episode_length / episode_count
@@ -164,17 +186,22 @@ def train(
     if eval_i == eval_frequency:
       break
 
-    observation, _ = env.reset()
+    envs.reset()
+
     num_steps = batch_size * num_minibatches * unroll_length
     num_epochs = num_timesteps // (num_steps * eval_frequency)
     num_unrolls = batch_size * num_minibatches // num_envs
     total_loss = 0
     t = time.time()
     for _ in range(num_epochs):
-      observation, td = train_unroll(agent, env, observation, num_unrolls,
-                                     unroll_length)
+      td = train_unroll(agent,
+                        privileged_obs,
+                        envs,
+                        num_unrolls,
+                        unroll_length,
+                        obs_size)
 
-      # make unroll first
+      # Make unroll first.
       def unroll_first(data):
         data = data.swapaxes(0, 1)
         return data.reshape([data.shape[0], -1] + list(data.shape[3:]))
@@ -182,6 +209,7 @@ def train(
 
       # update normalization statistics
       agent.update_normalization(td.observation)
+      agent.update_normalization_privileged(td.privileged_observation)
 
       for _ in range(num_update_epochs):
         # shuffle and batch the data
@@ -218,12 +246,12 @@ def progress(num_steps, metrics):
         train_sps: {metrics["speed/sps"]}')
   times.append(datetime.now())
   xdata.append(num_steps)
-  ydata.append(metrics['eval/episode_reward'].cpu())
+  ydata.append(metrics['eval/episode_reward'].cpu().numpy())
   eval_sps.append(metrics['speed/eval_sps'])
   train_sps.append(metrics['speed/sps'])
   clear_output(wait=True)
   plt.xlim([0, 30_000_000])
-  plt.ylim([0, 2000])
+  # plt.ylim([0, 2000])
   plt.xlabel('# environment steps')
   plt.ylabel('reward per episode')
   plt.plot(xdata, ydata)
@@ -236,11 +264,11 @@ def progress(num_steps, metrics):
 # def progress(_, metrics):
 #   if 'training/sps' in metrics:
 #     train_sps.append(metrics['training/sps'])
-    
+
 if __name__ == '__main__':
   # temporary fix to cuda memory OOM
   os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
-  print('Start training')
+  print('Start the PPO training ...')
   xdata = []
   ydata = []
   eval_sps = []
@@ -254,7 +282,5 @@ if __name__ == '__main__':
   print(f'eval steps/sec: {np.mean(eval_sps)}')
   print(f'train steps/sec: {np.mean(train_sps)}')
 
-  train_sps = []
-
-
+  print('Training is done!')
 
