@@ -240,6 +240,9 @@ if __name__ == '__main__':
                       help='Name of the environment to train on')
     parser.add_argument('--nb_training_cycles', type=int, default=1,
                         help='Number of training cycles')
+    parser.add_argument('--expert_model', type=str, default=None,
+                        help='Path to expert model in TrainedExperts folder to load for testing or fine-tuning')
+
 
     args = parser.parse_args()
     if args.env_name == 'biped':
