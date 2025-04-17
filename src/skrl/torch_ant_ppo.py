@@ -133,8 +133,8 @@ files.sort(key=lambda x: os.path.getmtime(os.path.join(main_director, x)))
 path = os.path.join(main_director, files[-1])
 print(f"Loading the model from {path}")
 
-checpoints_folder = os.path.join(path, "checkpoints")
-agent.load(os.path.join(checpoints_folder, "best_agent.pt"))
+checkpoints_folder = os.path.join(path, "checkpoints")
+agent.load(os.path.join(checkpoints_folder, "best_agent.pt"))
 
-# Start evaluation
+# Start evaluation.
 trainer.eval()
