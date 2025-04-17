@@ -22,6 +22,9 @@ import json
 import os
 from moviepy.video.io import ImageSequenceClip
 
+from MLE_train import ContinuousActionNN
+from CNF_train import ConditionalNormalizingFlow
+
 class OrnsteinUhlenbeckNoise:
     def __init__(self,theta: float,sigma: float,base_scale: float,mean: float = 0,std: float = 1) -> None:
         super().__init__()
@@ -232,7 +235,7 @@ if __name__ == '__main__':
     DEFAULT_PARAMS_ANT = DEFAULT_PARAMS_PENDULUM
 
     parser = argparse.ArgumentParser(description='Train DDPG on a given environment')
-    parser.add_argument('--env_name', type=str, default='Ant-v5',
+    parser.add_argument('--env_name', type=str, default='Ant-v4',
                       choices=['Ant-v5', 'Pendulum-v1', 'biped'],
                       help='Name of the environment to train on')
     parser.add_argument('--nb_training_cycles', type=int, default=1,
@@ -243,7 +246,7 @@ if __name__ == '__main__':
         params = DEFAULT_PARAMS_BIPED
     elif args.env_name == 'Pendulum-v1':
         params = DEFAULT_PARAMS_PENDULUM
-    elif args.env_name == 'Ant-v5':
+    elif args.env_name == 'Ant-v4':
         params = DEFAULT_PARAMS_ANT
     else:
         raise ValueError(f"Environment {args.env_name} not supported")
@@ -267,17 +270,12 @@ if __name__ == '__main__':
     BUFFER_LENGTH = params['buffer_length']
     BATCH_SIZE = params['batch_size']
     NB_TRAINING_CYCLES = args.nb_training_cycles
+    EXPERT_MODEL = args.expert_model
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    if NOISE == 'Gaussian':
-        noise = Normal(loc=0, scale=0.2)
-    elif NOISE == 'OrnsteinUhlenbeck':
-        noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
-    else:
-        raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
-
+    
     if ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
         env = gym.make(ENV_NAME)
         state_dim = env.observation_space.shape[0]
@@ -290,6 +288,24 @@ if __name__ == '__main__':
         action_dim = env.action_size
         action_low = env._soft_q_j_min
         action_high = env._soft_q_j_max
+
+    # Load expert model if provided
+        if EXPERT_MODEL:
+            experts_dir = os.path.join(os.path.dirname(__file__), 'TrainedExperts')
+            expert_path = os.path.join(experts_dir, f'{EXPERT_MODEL}.pth')
+            print(f"Loading expert model from: {expert_path}")
+            if EXPERT_MODEL == 'MLE/{ENV_NAME}':
+                expert = ContinuousActionNN(state_dim=state_dim, action_dim=action_dim)
+            elif EXPERT_MODEL == 'CNF/{ENV_NAME}':
+                expert = ConditionalNormalizingFlow(condition_dim=state_dim, n_flows=10, latent_dim=action_dim)
+        else:
+            if NOISE == 'Gaussian':
+                noise = Normal(loc=0, scale=0.2)
+            elif NOISE == 'OrnsteinUhlenbeck':
+                noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
+            else:
+                raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
+
 
 
     env.reset()
@@ -332,7 +348,19 @@ if __name__ == '__main__':
         for t in tqdm(range(TRAINING_STEPS), desc=f"Cycle {cycles+1}", unit="step"):
             with torch.no_grad():
                 action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-                expert_action = noise.sample(action.shape)
+                if EXPERT_MODEL == 'MLE/{ENV_NAME}':
+                    if ENV_NAME == 'Pendulum-v1':
+                        theta = np.arctan2(obs[1], obs[0])
+                        theta_dot = obs[2]
+                        new_state = np.array([theta, theta_dot]).reshape(1, -1)
+                        expert_action = expert.sample(torch.tensor(new_state, dtype=torch.float32, device=device))
+                    else:
+                        expert_action = expert.sample(torch.tensor(obs, dtype=torch.float32, device=device))
+                elif EXPERT_MODEL == 'CNF/{ENV_NAME}':
+                    expert_action = expert.sample(num_samples=1, condition=torch.tensor(obs, dtype=torch.float32, device=device))
+                else:
+                    expert_action = noise.sample(action.shape).to(device)
+
                 # print(expert_action)
                 noisy_action = action.cpu().numpy() + expert_action.cpu().numpy()
                 
