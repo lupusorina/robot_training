@@ -217,7 +217,7 @@ if __name__ == '__main__':
 
     DEFAULT_PARAMS_BIPED = {
         'noise': 'OrnsteinUhlenbeck',
-        'training_steps': 1000,
+        'training_steps': 10000,
         'warm_up': 0,
         'discount_factor': 0.99,
         'buffer_length': 15000,
@@ -235,8 +235,8 @@ if __name__ == '__main__':
     DEFAULT_PARAMS_ANT = DEFAULT_PARAMS_PENDULUM
 
     parser = argparse.ArgumentParser(description='Train DDPG on a given environment')
-    parser.add_argument('--env_name', type=str, default='Ant-v4',
-                      choices=['Ant-v5', 'Pendulum-v1', 'biped'],
+    parser.add_argument('--env_name', type=str, default='Pendulum-v1',
+                      choices=['Ant-v4', 'Pendulum-v1', 'biped'],
                       help='Name of the environment to train on')
     parser.add_argument('--nb_training_cycles', type=int, default=1,
                         help='Number of training cycles')
@@ -274,12 +274,12 @@ if __name__ == '__main__':
     BATCH_SIZE = params['batch_size']
     NB_TRAINING_CYCLES = args.nb_training_cycles
     EXPERT_MODEL = args.expert_model
-
+    EXPERT_MODEL = f'MLE/{ENV_NAME}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     
-    if ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+    if ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v4':
         env = gym.make(ENV_NAME)
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
@@ -287,31 +287,44 @@ if __name__ == '__main__':
         action_high = env.action_space.high
     elif ENV_NAME == 'biped': #is this is ok for action clipping?
         env = Biped(visualize=False)
-        state_dim = env.observation_size[0]
+        state_dim = 46#env.observation_size[0]//2
         action_dim = env.action_size
         action_low = env._soft_q_j_min
         action_high = env._soft_q_j_max
 
     # Load expert model if provided
-        if EXPERT_MODEL:
-            experts_dir = os.path.join(os.path.dirname(__file__), 'TrainedExperts')
-            expert_path = os.path.join(experts_dir, f'{EXPERT_MODEL}.pth')
-            print(f"Loading expert model from: {expert_path}")
-            if EXPERT_MODEL == 'MLE/{ENV_NAME}':
-                expert = ContinuousActionNN(state_dim=state_dim, action_dim=action_dim)
-            elif EXPERT_MODEL == 'CNF/{ENV_NAME}':
-                expert = ConditionalNormalizingFlow(condition_dim=state_dim, n_flows=10, latent_dim=action_dim)
+    if EXPERT_MODEL:
+        if ENV_NAME == 'Pendulum-v1':
+                state_dim = state_dim-1
+        experts_dir = os.path.join(os.path.dirname(__file__), 'TrainedExperts')
+        expert_path = os.path.join(experts_dir, f'{EXPERT_MODEL}.pth')
+        print(f"Loading expert model from: {expert_path}")
+        if EXPERT_MODEL == f'MLE/{ENV_NAME}':
+            print('mle expert')
+            expert = ContinuousActionNN(state_dim=state_dim, action_dim=action_dim)
+            expert.to(device=device)
+        elif EXPERT_MODEL == f'CNF/{ENV_NAME}':
+            print('cnf expert')
+            expert = ConditionalNormalizingFlow(condition_dim=state_dim, n_flows=10, latent_dim=action_dim)
+            expert.to(device=device)
+        expert.eval()
+    else:
+        if NOISE == 'Gaussian':
+            print('def noise')
+            noise = Normal(loc=0, scale=0.2)
+        elif NOISE == 'OrnsteinUhlenbeck':
+            noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
         else:
-            if NOISE == 'Gaussian':
-                noise = Normal(loc=0, scale=0.2)
-            elif NOISE == 'OrnsteinUhlenbeck':
-                noise = OrnsteinUhlenbeckNoise(theta=0.15, sigma=0.2, base_scale=0.1)
-            else:
-                raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
+            raise ValueError('Noise must be either Gaussian or OrnsteinUhlenbeck')
+      
 
 
 
     env.reset()
+    if ENV_NAME == 'biped':
+        state_dim = 46#env.observation_space.shape[0]
+    else:
+        state_dim = env.observation_space.shape[0]
 
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
     print(f"Action low: {action_low}, Action high: {action_high}")
@@ -350,22 +363,27 @@ if __name__ == '__main__':
 
         for t in tqdm(range(TRAINING_STEPS), desc=f"Cycle {cycles+1}", unit="step"):
             with torch.no_grad():
-                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-                if EXPERT_MODEL == 'MLE/{ENV_NAME}':
-                    if ENV_NAME == 'Pendulum-v1':
-                        theta = np.arctan2(obs[1], obs[0])
-                        theta_dot = obs[2]
-                        new_state = np.array([theta, theta_dot]).reshape(1, -1)
-                        expert_action = expert.sample(torch.tensor(new_state, dtype=torch.float32, device=device))
-                    else:
-                        expert_action = expert.sample(torch.tensor(obs, dtype=torch.float32, device=device))
-                elif EXPERT_MODEL == 'CNF/{ENV_NAME}':
-                    expert_action = expert.sample(num_samples=1, condition=torch.tensor(obs, dtype=torch.float32, device=device))
+                
+                if ENV_NAME == 'Pendulum-v1':
+                    state = np.array([np.arctan2(obs[1],obs[2]), obs[2]])
+                    expert_input = torch.tensor(state, dtype=torch.float32, device=device).reshape(1, -1)
+                elif ENV_NAME == 'biped':
+                    obs = obs[:46].copy()
+                    expert_input = torch.tensor(obs,dtype=torch.float32,device=device).reshape(1, -1)
+                else:
+                    expert_input = torch.tensor(obs, dtype=torch.float32, device=device).reshape(1, -1)
+                
+                if EXPERT_MODEL == f'MLE/{ENV_NAME}':
+                        expert_action,_,_ = expert.sample(expert_input)
+                elif EXPERT_MODEL == f'CNF/{ENV_NAME}':
+                        base_mean, _ = expert.conditional_base(expert_input)
+                        expert_action,_ = expert.inverse(base_mean, expert_input)
                 else:
                     expert_action = noise.sample(action.shape).to(device)
 
                 # print(expert_action)
-                noisy_action = action.cpu().numpy() + expert_action.cpu().numpy()
+                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+                noisy_action = action.cpu().numpy() + expert_action.cpu().numpy().squeeze()
                 
                 # TODO: clip needs to be done differently, considering also qpos_joints
                 if ENV_NAME != 'biped': 
@@ -373,7 +391,11 @@ if __name__ == '__main__':
                                                 a_min=action_low,
                                                 a_max=action_high)
 
-                obs_, reward, termination, truncation, _ = env.step(noisy_action)
+                full_obs_, reward, termination, truncation, _ = env.step(noisy_action)
+                if ENV_NAME == 'biped':    
+                    obs_ = full_obs_[:46]
+                else:
+                    obs_ = full_obs_.copy()
                 done = termination or truncation
                 cumulative_reward += reward
                 
@@ -388,7 +410,7 @@ if __name__ == '__main__':
                 cumulative_reward = 0
                 obs, _ = env.reset()
             else:
-                obs = obs_.copy()
+                obs = full_obs_.copy()
 
         for i in range(len(agent.pi_loss)):
             list_of_all_the_data.append({
@@ -399,17 +421,21 @@ if __name__ == '__main__':
             })
 
         # Plot the reward.
+        if EXPERT_MODEL:
+            TYPE = ENV_NAME
+        else:
+            TYPE = NOISE
         fig, ax = plt.subplots(1, 1)
         ax.plot(episodic_returns)
         ax.set_title(f'{NOISE} added Noise')
         ax.set_xlabel('Training Steps')
         ax.set_ylabel('Episodic Returns')
-        plt.savefig(f'{ABS_FOLDER_RESUlTS}/{NOISE}_{cycles}.png')
+        plt.savefig(f'{ABS_FOLDER_RESUlTS}/{TYPE}_{cycles}.png')
         plt.close()
 
         # Save the results.
         df = pd.DataFrame(list_of_all_the_data)
-        df.to_csv(f'{ABS_FOLDER_RESUlTS}/{NOISE}_{cycles}.csv', index=False)
+        df.to_csv(f'{ABS_FOLDER_RESUlTS}/{TYPE}_{cycles}.csv', index=False)
 
         # Save the behaviour policy.
         torch.save(behavior_policy.state_dict(), f'{ABS_FOLDER_RESUlTS}/policy_{cycles}.pth')
@@ -422,9 +448,9 @@ if __name__ == '__main__':
 
         frames = []
         obs, _= env.reset()
-        for _ in range(200):
+        for _ in range(1000):
             action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
-            action = action.detach().numpy()
+            action = action.detach().cpu().numpy()
             obs, reward, terminated, truncated, info = test_env.step(action)
             frames.append(test_env.render())
         test_env.close()
@@ -443,11 +469,14 @@ if __name__ == '__main__':
     if ENV_NAME == 'biped':
         test_env = Biped(visualize=False)
         obs, _ = test_env.reset()
+        # print(obs.shape)
+        # quit()
         rollout = []
         for _ in tqdm(range(10000)):
             # action = np.random.uniform(-1, 1, test_env.action_size)
+            non_priv_state = obs[:46]
             with torch.no_grad():
-                action = behavior_policy.forward(torch.tensor(obs, dtype=torch.float32, device=device))
+                action = behavior_policy.forward(torch.tensor(non_priv_state, dtype=torch.float32, device=device))
                 action = action.cpu().numpy()
             action = np.clip(action, a_min=action_low, a_max=action_high)
             obs, rewards, done, _, _ = test_env.step(action)
@@ -487,5 +516,5 @@ if __name__ == '__main__':
         media.write_video(f'{ABS_FOLDER_RESUlTS}/behaviour_robot_after_training.mp4', frames, fps=fps)
         print('Video saved')
 
-    elif ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v5':
+    elif ENV_NAME == 'Pendulum-v1' or ENV_NAME == 'Ant-v4':
         run_test(env_name=ENV_NAME)
