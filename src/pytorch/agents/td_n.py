@@ -119,7 +119,7 @@ class Policy(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), policy_lr)
         if type(action_lim) is not torch.Tensor:
-            action_lim = torch.tensor(action_lim, dtype=torch.float32)
+            action_lim = torch.tensor(action_lim, dtype=torch.float32,device=device)
         self.action_lim = action_lim
         self.to(device)
         
