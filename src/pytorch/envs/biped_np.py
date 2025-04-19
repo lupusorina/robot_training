@@ -283,9 +283,10 @@ class Biped(gym.Env):
         self.info["motor_targets"] = motor_targets
         self.data.ctrl = motor_targets.copy()
 
-        # Step the model.
+        # Step the model N times.
         if not self.paused:
-            mujoco.mj_step(self._mj_model, self.data)
+            for _ in range(self._n_substeps):
+                mujoco.mj_step(self._mj_model, self.data)
 
         # Check contacts. TODO: fix this
         contact = np.array([
@@ -506,6 +507,11 @@ class Biped(gym.Env):
     @property
     def privileged_observation_size(self) -> tuple:
         return (self._privileged_state.size, )
+
+    @property
+    def _n_substeps(self) -> int:
+        """Number of sim steps per control step."""
+        return int(round(self.ctrl_dt / self.sim_dt))
 
     # Tracking rewards.
     def _reward_tracking_lin_vel(self, commands: np.ndarray, local_vel: np.ndarray, ) -> np.ndarray:
