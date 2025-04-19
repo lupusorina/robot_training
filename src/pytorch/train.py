@@ -15,6 +15,7 @@ import gymnasium as gym
 import pandas as pd
 
 import tqdm as tqdm
+import utils
 
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
@@ -267,6 +268,9 @@ def progress(num_steps, metrics):
 
 if __name__ == '__main__':
   # temporary fix to cuda memory OOM
+
+  utils.set_seed()
+
   os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
   print('Start the PPO training ...')
   xdata = []
