@@ -85,3 +85,31 @@ def draw_joystick_command(
       from_=arrow_from,
       to=arrow_to,
   )
+
+import time
+import os
+import sys
+import random
+import torch
+
+def set_seed(seed: Optional[int] = None) -> int:
+  ''' Taken from skrl '''
+  # generate a random seed
+  if seed is None:
+    try:
+      seed = int.from_bytes(os.urandom(4), byteorder=sys.byteorder)
+    except NotImplementedError:
+      seed = int(time.time() * 1000)
+    seed %= 2**31  # NumPy's legacy seeding seed must be between 0 and 2**32 - 1
+  seed = int(seed)
+
+  # numpy
+  random.seed(seed)
+  np.random.seed(seed)
+
+  # torch
+  torch.manual_seed(seed)
+  torch.cuda.manual_seed(seed)
+  torch.cuda.manual_seed_all(seed)
+
+  return seed
