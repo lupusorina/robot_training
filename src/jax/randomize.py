@@ -52,7 +52,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
             + jax.random.uniform(key, shape=(10,), minval=-0.1, maxval=0.1)
         )
 
-        # Center of mass offset
+        # Center of mass offset.
         rng, key = jax.random.split(rng)
         com_offset = jax.random.uniform(key, shape=(3,), minval=-0.1, maxval=0.1)
         body_ipos = model.body_ipos
@@ -60,11 +60,23 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
             body_ipos[TORSO_BODY_ID] + com_offset
         )
 
+        # Kp and Kv for the motors.
+        # Initialize actuator gain parameters
+        actuator_gainprm = model.actuator_gainprm
+
+        # Update each actuator's gain parameter
+        for i in range(model.nu):
+            kp_nominal = model.actuator_gainprm[i][0]
+            rng, key = jax.random.split(rng)
+            dkp = jax.random.uniform(key, minval=-0.1, maxval=0.1)
+            actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal + dkp)
+
         return (
             geom_friction,
             body_mass,
             qpos0,
             body_ipos,
+            actuator_gainprm,
         )
 
     (
@@ -72,6 +84,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         body_mass,
         qpos0,
         body_ipos,
+        actuator_gainprm,
     ) = rand_dynamics(rng)
 
     in_axes = jax.tree_util.tree_map(lambda x: None, model)
@@ -80,6 +93,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         "body_mass": 0,
         "qpos0": 0,
         "body_ipos": 0,
+        "actuator_gainprm": 0,
     })
 
     model = model.tree_replace({
@@ -87,6 +101,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         "body_mass": body_mass,
         "qpos0": qpos0,
         "body_ipos": body_ipos,
+        "actuator_gainprm": actuator_gainprm,
     })
 
     return model, in_axes
