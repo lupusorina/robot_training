@@ -347,20 +347,40 @@ class Biped(gym.Env):
         """ Get observation from sensors. """
         # Gyroscope.
         gyro = self.get_sensor_data(GYRO_SENSOR)
-        noisy_gyro = gyro.copy() # TODO: add  noise
+        noisy_gyro = (
+            gyro
+            + (2 * np.random.uniform(size=gyro.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.gyro
+        )
 
         # Gravity.
         R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3).copy()
         gravity = R_gravity_sensor.T @ np.array([0, 0, -1]) # TODO: check this
-        noisy_gravity = gravity.copy() # TODO: add noise
+        noisy_gravity = (
+            gravity
+            + (2 * np.random.uniform(size=gravity.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.gravity
+        )
 
         # Joint angles.
         joint_angles = self.data.qpos[7:].copy()
-        noisy_joint_angles = joint_angles.copy()
+        noisy_joint_angles = (
+            joint_angles
+            + (2 * np.random.uniform(size=joint_angles.shape) - 1)
+            * self._config.noise_config.level
+            * self._q_j_noise_scale
+        )
 
         # Joint velocities.
         joint_vel = self.data.qvel[6:].copy()
-        noisy_joint_vel = joint_vel.copy()
+        noisy_joint_vel = (
+            joint_vel
+            + (2 * np.random.uniform(size=joint_vel.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.joint_vel
+        )
 
         # Phase.
         cos = np.cos(self.info["phase"])
@@ -369,7 +389,12 @@ class Biped(gym.Env):
 
         # Linear velocity.        
         linvel = self.get_sensor_data(LOCAL_LINVEL_SENSOR)
-        noisy_linvel = linvel.copy()
+        noisy_linvel = (
+            linvel
+            + (2 * np.random.uniform(size=linvel.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.linvel
+        )
 
         # Combine everything into state.
         self._state = np.hstack([
