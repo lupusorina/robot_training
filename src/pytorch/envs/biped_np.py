@@ -288,7 +288,7 @@ class Biped(gym.Env):
             for _ in range(self._n_substeps):
                 mujoco.mj_step(self._mj_model, self.data)
 
-        # Check contacts. TODO: fix this
+        # Check contacts.
         contact = np.array([
             geoms_colliding_np(self.data, geom_id, self._floor_geom_id)
             for geom_id in self._feet_geom_id
