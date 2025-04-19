@@ -735,16 +735,14 @@ if __name__ == "__main__":
     rollout = []
 
     for _ in tqdm.tqdm(range(1000)):
-        # action = np.random.uniform(-1, 1, env.action_size)
         action = np.zeros(env.action_size)
-        obs_dict, rewards, done, _, _ = env.step(action)
+        priviliged_obs, rewards, done, _, _ = env.step(action)
         state = {
             'qpos': env.data.qpos.copy(),
             'qvel': env.data.qvel.copy(),
             'xfrc_applied': env.data.xfrc_applied.copy()
         }
         rollout.append(state)
-        print(env.info["last_contact"])
 
     render_every = 1 # int.
     fps = 1/ env.sim_dt / render_every
