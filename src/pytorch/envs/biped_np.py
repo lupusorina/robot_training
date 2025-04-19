@@ -480,8 +480,8 @@ class Biped(gym.Env):
             ),
             "energy": self._cost_energy(self.data.qvel[6:], self.data.actuator_force),
             # Feet related rewards.
-            "feet_slip": self._cost_feet_slip(self.data, contact, self.info),
-            "feet_clearance": self._cost_feet_clearance(self.data, self.info),
+            "feet_slip": self._cost_feet_slip(contact, self.info),
+            "feet_clearance": self._cost_feet_clearance(self.info),
             "feet_height": self._cost_feet_height(
                 self.info["swing_peak"], first_contact, self.info
             ),
@@ -489,7 +489,6 @@ class Biped(gym.Env):
                 self.info["feet_air_time"], first_contact, self.info["command"]
             ),
             "feet_phase": self._reward_feet_phase(
-                self.data,
                 self.info["phase"],
                 self._config.reward_config.max_foot_height,
                 self.info["command"],
@@ -602,7 +601,7 @@ class Biped(gym.Env):
         return np.sum(np.square(q_joints - self._default_q_joints) * weights)
 
     # Feet related rewards.
-    def _cost_feet_slip(self, data,
+    def _cost_feet_slip(self,
                         contact,
                         info: dict[str, Any]) -> np.ndarray:
         del info  # Unused.
@@ -612,14 +611,13 @@ class Biped(gym.Env):
         return reward
 
     def _cost_feet_clearance(self,
-                             data,
                              info) -> np.ndarray:
         del info  # Unused.
-        feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+        feet_vel = self.data.sensordata[self._foot_linvel_sensor_adr]
         feet_vel = feet_vel.copy() # Add copy here
         vel_xy = feet_vel[..., :2]
         vel_norm = np.sqrt(np.linalg.norm(vel_xy, axis=-1))
-        foot_pos = data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id].copy()
         foot_z = foot_pos[..., -1]
         delta = np.abs(foot_z - self._config.reward_config.max_foot_height)
         return np.sum(delta * vel_norm)
@@ -651,14 +649,13 @@ class Biped(gym.Env):
 
     def _reward_feet_phase(
         self,
-        data,
         phase: np.ndarray,
         foot_height: np.ndarray,
         commands: np.ndarray,
     ) -> np.ndarray:
         # Reward for tracking the desired foot height.
         del commands  # Unused.
-        foot_pos = data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id].copy()
         foot_z = foot_pos[..., -1]
         rz = utils.get_rz_np(phase, swing_height=foot_height)
         error = np.sum(np.square(foot_z - rz))
