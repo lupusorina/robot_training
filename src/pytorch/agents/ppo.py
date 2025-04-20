@@ -10,9 +10,10 @@ class Agent(nn.Module):
   def __init__(self,
                policy_layers: Sequence[int],
                value_layers: Sequence[int],
-               entropy_cost: float = 0.01,
+               entropy_cost: float = 0.005,
                discounting: float = 0.99,
-               reward_scaling: float = 1.0,
+               reward_scaling: float = 0.1,
+               clip_epsilon: float = 0.2,
                device: str = 'cpu'):
     super(Agent, self).__init__()
 
@@ -42,7 +43,7 @@ class Agent(nn.Module):
     self.discounting = discounting
     self.reward_scaling = reward_scaling
     self.lambda_ = 0.95
-    self.epsilon = 0.3
+    self.epsilon = clip_epsilon
     self.device = device
 
   @torch.jit.export
