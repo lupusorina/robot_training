@@ -120,14 +120,15 @@ def train(
     device: str = 'cuda',
     num_timesteps: int = 30_000_000,
     eval_frequency: int = 10,
-    unroll_length: int = 5,
+    unroll_length: int = 20,
     batch_size: int = 1024,
     num_minibatches: int = 32,
     num_update_epochs: int = 4,
     reward_scaling: float = .1,
-    entropy_cost: float = 1e-2,
-    discounting: float = .97,
+    entropy_cost: float = 0.005,
+    discounting: float = 0.99,
     learning_rate: float = 3e-4,
+    clip_epsilon: float = 0.2,
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
   """Trains a policy via PPO."""
@@ -165,11 +166,11 @@ def train(
   print("Observation size: ", obs_size)
 
   # Create the agent.
-  policy_layers = [obs_size, 512, 256, 128, env.action_space.shape[-1] * 2]
-  value_layers = [privileged_obs.shape[-1], 512, 256, 128, 1]
+  policy_layers = [obs_size, 256, 128, 64, env.action_space.shape[-1] * 2]
 
+  value_layers = [env.observation_space.shape[-1], 256, 128, 64, 1]
   agent = Agent(policy_layers, value_layers, entropy_cost, discounting,
-                reward_scaling, device)
+                reward_scaling, clip_epsilon, device)
   agent = torch.jit.script(agent.to(device))
   optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
 
