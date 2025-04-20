@@ -19,6 +19,7 @@ from mujoco import mjx
 
 FLOOR_GEOM_ID = 0
 TORSO_BODY_ID = 1
+TORSO_BODY_NAME = "base_link"
 
 def domain_randomize(model: mjx.Model, rng: jax.Array):
     @jax.vmap
@@ -43,24 +44,47 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
             body_mass[TORSO_BODY_ID] + dmass
         )
 
-        # Jitter qpos0: +U(-0.05, 0.05).
+        # Jitter qpos0: +U(-0.1, 0.1).
         rng, key = jax.random.split(rng)
         qpos0 = model.qpos0
         qpos0 = qpos0.at[7:].set(
             qpos0[7:]
-            + jax.random.uniform(key, shape=(10,), minval=-0.05, maxval=0.05) # TODO: remove hardcoded value
+            + jax.random.uniform(key, shape=(10,), minval=-0.1, maxval=0.1)
         )
+
+        # Center of mass offset.
+        rng, key = jax.random.split(rng)
+        com_offset = jax.random.uniform(key, shape=(3,), minval=-0.1, maxval=0.1)
+        body_ipos = model.body_ipos
+        body_ipos = body_ipos.at[TORSO_BODY_ID].set(
+            body_ipos[TORSO_BODY_ID] + com_offset
+        )
+
+        # Kp and Kv for the motors.
+        # Initialize actuator gain parameters
+        actuator_gainprm = model.actuator_gainprm
+
+        # Update each actuator's gain parameter
+        for i in range(model.nu):
+            kp_nominal = model.actuator_gainprm[i][0]
+            rng, key = jax.random.split(rng)
+            dkp = jax.random.uniform(key, minval=-0.5, maxval=0.5)
+            actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal + dkp)
 
         return (
             geom_friction,
             body_mass,
             qpos0,
+            body_ipos,
+            actuator_gainprm,
         )
 
     (
         friction,
         body_mass,
         qpos0,
+        body_ipos,
+        actuator_gainprm,
     ) = rand_dynamics(rng)
 
     in_axes = jax.tree_util.tree_map(lambda x: None, model)
@@ -68,12 +92,16 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         "geom_friction": 0,
         "body_mass": 0,
         "qpos0": 0,
+        "body_ipos": 0,
+        "actuator_gainprm": 0,
     })
 
     model = model.tree_replace({
         "geom_friction": friction,
         "body_mass": body_mass,
         "qpos0": qpos0,
+        "body_ipos": body_ipos,
+        "actuator_gainprm": actuator_gainprm,
     })
 
     return model, in_axes

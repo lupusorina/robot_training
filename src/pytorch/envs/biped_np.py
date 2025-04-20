@@ -102,9 +102,9 @@ def default_config() -> config_dict.ConfigDict:
           interval_range=[5.0, 10.0],
           magnitude_range=[0.05, 0.4],
       ),
-      lin_vel_x=[-0.5, 0.5],
-      lin_vel_y=[-0.5, 0.5],
-      ang_vel_yaw=[-0.5, 0.5],
+      lin_vel_x=[-0.1, 0.1],
+      lin_vel_y=[-0.1, 0.1],
+      ang_vel_yaw=[-0.1, 0.1],
   )
 
 
@@ -242,8 +242,8 @@ class Biped(gym.Env):
         qvel[0:6] = np.random.uniform(-0.5, 0.5, 6)
 
         # Initialize data.
-        self.data.qpos = qpos
-        self.data.qvel = qvel
+        self.data.qpos = qpos.copy()
+        self.data.qvel = qvel.copy()
 
         # Phase and gait.
         gait_freq = np.random.uniform(1.25, 1.5)
@@ -266,10 +266,13 @@ class Biped(gym.Env):
             "push": np.zeros(2),
             "push_step": 0,
             # "push_interval_steps": push_interval_steps
+            "qpos": self.data.qpos,
+            "qvel": self.data.qvel,
+            "xfrc_applied": self.data.xfrc_applied
         }
         priviliged_observation = self._get_priviliged_obs(contact=np.zeros(2))
         mujoco.mj_step(self._mj_model, self.data)
-        return priviliged_observation, {}
+        return priviliged_observation, self.info
 
     def get_privileged_observation(self):
         return self._privileged_state
@@ -283,11 +286,12 @@ class Biped(gym.Env):
         self.info["motor_targets"] = motor_targets
         self.data.ctrl = motor_targets.copy()
 
-        # Step the model.
+        # Step the model N times.
         if not self.paused:
-            mujoco.mj_step(self._mj_model, self.data)
+            for _ in range(self._n_substeps):
+                mujoco.mj_step(self._mj_model, self.data)
 
-        # Check contacts. TODO: fix this
+        # Check contacts.
         contact = np.array([
             geoms_colliding_np(self.data, geom_id, self._floor_geom_id)
             for geom_id in self._feet_geom_id
@@ -338,6 +342,9 @@ class Biped(gym.Env):
         self.info["feet_air_time"] *= ~contact
         self.info["last_contact"] = contact
         self.info["swing_peak"] *= ~contact
+        self.info["qpos"] = self.data.qpos
+        self.info["qvel"] = self.data.qvel
+        self.info["xfrc_applied"] = self.data.xfrc_applied
 
         # return observation, reward, terminated, False, info
         return priviliged_observation, reward, done, False, self.info
@@ -346,20 +353,40 @@ class Biped(gym.Env):
         """ Get observation from sensors. """
         # Gyroscope.
         gyro = self.get_sensor_data(GYRO_SENSOR)
-        noisy_gyro = gyro.copy() # TODO: add  noise
+        noisy_gyro = (
+            gyro
+            + (2 * np.random.uniform(size=gyro.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.gyro
+        )
 
         # Gravity.
-        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3).copy()
+        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3)
         gravity = R_gravity_sensor.T @ np.array([0, 0, -1]) # TODO: check this
-        noisy_gravity = gravity.copy() # TODO: add noise
+        noisy_gravity = (
+            gravity
+            + (2 * np.random.uniform(size=gravity.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.gravity
+        )
 
         # Joint angles.
-        joint_angles = self.data.qpos[7:].copy()
-        noisy_joint_angles = joint_angles.copy()
+        joint_angles = self.data.qpos[7:]
+        noisy_joint_angles = (
+            joint_angles
+            + (2 * np.random.uniform(size=joint_angles.shape) - 1)
+            * self._config.noise_config.level
+            * self._q_j_noise_scale
+        )
 
         # Joint velocities.
         joint_vel = self.data.qvel[6:].copy()
-        noisy_joint_vel = joint_vel.copy()
+        noisy_joint_vel = (
+            joint_vel
+            + (2 * np.random.uniform(size=joint_vel.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.joint_vel
+        )
 
         # Phase.
         cos = np.cos(self.info["phase"])
@@ -368,7 +395,12 @@ class Biped(gym.Env):
 
         # Linear velocity.        
         linvel = self.get_sensor_data(LOCAL_LINVEL_SENSOR)
-        noisy_linvel = linvel.copy()
+        noisy_linvel = (
+            linvel
+            + (2 * np.random.uniform(size=linvel.shape) - 1)
+            * self._config.noise_config.level
+            * self._config.noise_config.scales.linvel
+        )
 
         # Combine everything into state.
         self._state = np.hstack([
@@ -454,8 +486,8 @@ class Biped(gym.Env):
             ),
             "energy": self._cost_energy(self.data.qvel[6:], self.data.actuator_force),
             # Feet related rewards.
-            "feet_slip": self._cost_feet_slip(self.data, contact, self.info),
-            "feet_clearance": self._cost_feet_clearance(self.data, self.info),
+            "feet_slip": self._cost_feet_slip(contact, self.info),
+            "feet_clearance": self._cost_feet_clearance(self.info),
             "feet_height": self._cost_feet_height(
                 self.info["swing_peak"], first_contact, self.info
             ),
@@ -463,7 +495,6 @@ class Biped(gym.Env):
                 self.info["feet_air_time"], first_contact, self.info["command"]
             ),
             "feet_phase": self._reward_feet_phase(
-                self.data,
                 self.info["phase"],
                 self._config.reward_config.max_foot_height,
                 self.info["command"],
@@ -493,7 +524,7 @@ class Biped(gym.Env):
       sensor_id = self._mj_model.sensor(sensor_name).id
       sensor_adr = self._mj_model.sensor_adr[sensor_id]
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim].copy()
+      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim]
 
     @property
     def action_size(self) -> int:
@@ -506,6 +537,11 @@ class Biped(gym.Env):
     @property
     def privileged_observation_size(self) -> tuple:
         return (self._privileged_state.size, )
+
+    @property
+    def _n_substeps(self) -> int:
+        """Number of sim steps per control step."""
+        return int(round(self.ctrl_dt / self.sim_dt))
 
     # Tracking rewards.
     def _reward_tracking_lin_vel(self, commands: np.ndarray, local_vel: np.ndarray, ) -> np.ndarray:
@@ -571,7 +607,7 @@ class Biped(gym.Env):
         return np.sum(np.square(q_joints - self._default_q_joints) * weights)
 
     # Feet related rewards.
-    def _cost_feet_slip(self, data,
+    def _cost_feet_slip(self,
                         contact,
                         info: dict[str, Any]) -> np.ndarray:
         del info  # Unused.
@@ -581,14 +617,12 @@ class Biped(gym.Env):
         return reward
 
     def _cost_feet_clearance(self,
-                             data,
                              info) -> np.ndarray:
         del info  # Unused.
-        feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
-        feet_vel = feet_vel.copy() # Add copy here
+        feet_vel = self.data.sensordata[self._foot_linvel_sensor_adr]
         vel_xy = feet_vel[..., :2]
         vel_norm = np.sqrt(np.linalg.norm(vel_xy, axis=-1))
-        foot_pos = data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id]
         foot_z = foot_pos[..., -1]
         delta = np.abs(foot_z - self._config.reward_config.max_foot_height)
         return np.sum(delta * vel_norm)
@@ -620,14 +654,13 @@ class Biped(gym.Env):
 
     def _reward_feet_phase(
         self,
-        data,
         phase: np.ndarray,
         foot_height: np.ndarray,
         commands: np.ndarray,
     ) -> np.ndarray:
         # Reward for tracking the desired foot height.
         del commands  # Unused.
-        foot_pos = data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id]
         foot_z = foot_pos[..., -1]
         rz = utils.get_rz_np(phase, swing_height=foot_height)
         error = np.sum(np.square(foot_z - rz))
@@ -704,19 +737,29 @@ if __name__ == "__main__":
     env = Biped(visualize=False)
     env.reset()
 
+    # Get all the actuator names.
+    actuator_names = [env._mj_model.actuator(i).name for i in range(env._mj_model.nu)]
+    print(actuator_names)
+
+    # Get the actuator index.
+    for name in actuator_names:
+        act_id = env._mj_model.actuator(name=name)
+        print(name, act_id.gainprm[0])
+
+    for i in range(env._mj_model.nu):
+        print(env._mj_model.actuator_gainprm[i][0])
+
     rollout = []
 
     for _ in tqdm.tqdm(range(1000)):
-        # action = np.random.uniform(-1, 1, env.action_size)
         action = np.zeros(env.action_size)
-        obs_dict, rewards, done, _, _ = env.step(action)
+        priviliged_obs, rewards, done, _, _ = env.step(action)
         state = {
-            'qpos': env.data.qpos.copy(),
-            'qvel': env.data.qvel.copy(),
-            'xfrc_applied': env.data.xfrc_applied.copy()
+            'qpos': env.data.qpos,
+            'qvel': env.data.qvel,
+            'xfrc_applied': env.data.xfrc_applied
         }
         rollout.append(state)
-        print(env.info["last_contact"])
 
     render_every = 1 # int.
     fps = 1/ env.sim_dt / render_every

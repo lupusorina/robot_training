@@ -55,7 +55,7 @@ print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
 # Brax PPO config.
 brax_ppo_config = config_dict.create(
-      num_timesteps=150_000_000,
+      num_timesteps=250_000_000,
       num_evals=15,
       reward_scaling=1.0,
       clipping_epsilon=0.2,

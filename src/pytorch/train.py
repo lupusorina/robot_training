@@ -15,6 +15,10 @@ import gymnasium as gym
 import pandas as pd
 
 import tqdm as tqdm
+import utils
+
+import mujoco
+import mediapy as media
 
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
@@ -24,7 +28,6 @@ if not os.path.exists(os.path.join(RESULTS, time_now)):
     os.makedirs(os.path.join(RESULTS, time_now))
 FOLDER_RESULTS = os.path.join(RESULTS, time_now)
 ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
-FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
 StepData = collections.namedtuple(
@@ -53,19 +56,29 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
 
-  for _ in range(length):
+  rollout_envs = {
+    f'rollout_env_{i}': [] for i in range(envs.num_envs)
+  }
+  for idx_length in range(length):
     _, action = agent.get_logits_action(obs)
-    privileged_obs, reward, done, _, _ = envs.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+    privileged_obs, reward, done, _, info = envs.step(Agent.dist_postprocess(action).detach().cpu().numpy())
     obs = privileged_obs[:, :obs_size].copy()
-    assert obs.all() == privileged_obs.all()
+    for i in range(envs.num_envs):
+      rollout_envs[f'rollout_env_{i}'].append({
+        'qpos': info['qpos'][i],
+        'qvel': info['qvel'][i],
+        'xfrc_applied': info['xfrc_applied'][i]
+      })
+
     obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
     done = torch.tensor(done, device=agent.device, dtype=torch.float32)
     reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
 
+
   print('End of eval unroll')
-  return episodes, episode_reward / episodes
+  return episodes, episode_reward / episodes, rollout_envs
 
 
 def train_unroll(agent: Agent, privileged_obs: torch.Tensor, env: gym.Env, num_unrolls: int, unroll_length: int, obs_size: int):
@@ -107,14 +120,15 @@ def train(
     device: str = 'cuda',
     num_timesteps: int = 30_000_000,
     eval_frequency: int = 10,
-    unroll_length: int = 5,
+    unroll_length: int = 20,
     batch_size: int = 1024,
     num_minibatches: int = 32,
     num_update_epochs: int = 4,
     reward_scaling: float = .1,
-    entropy_cost: float = 1e-2,
-    discounting: float = .97,
+    entropy_cost: float = 0.005,
+    discounting: float = 0.99,
     learning_rate: float = 3e-4,
+    clip_epsilon: float = 0.2,
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
   """Trains a policy via PPO."""
@@ -152,11 +166,11 @@ def train(
   print("Observation size: ", obs_size)
 
   # Create the agent.
-  policy_layers = [obs_size, 512, 256, 128, env.action_space.shape[-1] * 2]
-  value_layers = [privileged_obs.shape[-1], 512, 256, 128, 1]
+  policy_layers = [obs_size, 256, 128, 64, env.action_space.shape[-1] * 2]
 
+  value_layers = [env.observation_space.shape[-1], 256, 128, 64, 1]
   agent = Agent(policy_layers, value_layers, entropy_cost, discounting,
-                reward_scaling, device)
+                reward_scaling, clip_epsilon, device)
   agent = torch.jit.script(agent.to(device))
   optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
 
@@ -168,7 +182,7 @@ def train(
     if progress_fn:
       t = time.time()
       with torch.no_grad():
-        episode_count, episode_reward = eval_unroll(eval_i, agent, envs, episode_length, obs_size)
+        episode_count, episode_reward, rollout_envs = eval_unroll(eval_i, agent, envs, episode_length, obs_size)
       duration = time.time() - t
       # TODO: only count stats from completed episodes
       episode_avg_length = num_envs * episode_length / episode_count
@@ -182,6 +196,54 @@ def train(
           'losses/total_loss': total_loss,
       }
       progress_fn(total_steps, progress)
+
+      # Visualize the rollout.
+      render_video = True
+      if render_video:
+        media_files_list = []
+        max_num_envs = np.min([envs.num_envs, 10]) # Avoid too many videos to save.
+        all_frames = []
+        for idx_env in range(max_num_envs):
+          rollout_env = rollout_envs[f'rollout_env_{idx_env}']
+
+          render_every = 1 # int.
+          fps = 1/ env.ctrl_dt / render_every
+          traj = rollout_env[::render_every]
+
+          scene_option = mujoco.MjvOption()
+          scene_option.geomgroup[2] = True
+          scene_option.geomgroup[3] = False
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+          frames = env.render(
+              traj,
+              camera="track",
+              scene_option=scene_option,
+              width=640,
+              height=480,
+          )
+
+          # Save individual video
+          media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4', frames, fps=fps)
+          media_files_list.append(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4')
+          all_frames.append(np.array(frames))  # Ensure frames are numpy arrays
+          print(f'Video nb {idx_env} saved')
+
+        # Arrange frames in a 2-row grid
+        num_videos = len(all_frames)
+        num_cols = (num_videos + 1) // 2  # Ceiling division
+        frame_shape = all_frames[0].shape
+        final_frames = np.zeros((frame_shape[0], frame_shape[1] * 2, frame_shape[2] * num_cols, frame_shape[3]), dtype=all_frames[0].dtype)
+
+        for i, frames in enumerate(all_frames):
+            row = i // num_cols
+            col = i % num_cols
+            final_frames[:, row*frame_shape[1]:(row+1)*frame_shape[1],
+                        col*frame_shape[2]:(col+1)*frame_shape[2]] = frames
+
+        media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_envs_epoch_{eval_i}.mp4', final_frames, fps=fps)
 
     if eval_i == eval_frequency:
       break
@@ -267,6 +329,9 @@ def progress(num_steps, metrics):
 
 if __name__ == '__main__':
   # temporary fix to cuda memory OOM
+
+  utils.set_seed()
+
   os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
   print('Start the PPO training ...')
   xdata = []
