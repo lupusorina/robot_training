@@ -17,6 +17,9 @@ import pandas as pd
 import tqdm as tqdm
 import utils
 
+import mujoco
+import mediapy as media
+
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
     os.makedirs(RESULTS)
@@ -53,19 +56,29 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
 
-  for _ in range(length):
+  rollout_envs = {
+    f'rollout_env_{i}': [] for i in range(envs.num_envs)
+  }
+  for idx_length in range(length):
     _, action = agent.get_logits_action(obs)
-    privileged_obs, reward, done, _, _ = envs.step(Agent.dist_postprocess(action).detach().cpu().numpy())
+    privileged_obs, reward, done, _, info = envs.step(Agent.dist_postprocess(action).detach().cpu().numpy())
     obs = privileged_obs[:, :obs_size].copy()
-    assert obs.all() == privileged_obs.all()
+    for i in range(envs.num_envs):
+      rollout_envs[f'rollout_env_{i}'].append({
+        'qpos': info['qpos'][i],
+        'qvel': info['qvel'][i],
+        'xfrc_applied': info['xfrc_applied'][i]
+      })
+
     obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
     done = torch.tensor(done, device=agent.device, dtype=torch.float32)
     reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
 
+
   print('End of eval unroll')
-  return episodes, episode_reward / episodes
+  return episodes, episode_reward / episodes, rollout_envs
 
 
 def train_unroll(agent: Agent, privileged_obs: torch.Tensor, env: gym.Env, num_unrolls: int, unroll_length: int, obs_size: int):
@@ -182,6 +195,36 @@ def train(
           'losses/total_loss': total_loss,
       }
       progress_fn(total_steps, progress)
+
+      # Visualize the rollout.
+      render_video = True
+      for idx_env in range(envs.num_envs):
+        if render_video:
+          rollout_env = rollout_envs[f'rollout_env_{idx_env}']
+
+          render_every = 1 # int.
+          fps = 1/ env.ctrl_dt / render_every
+          traj = rollout_env[::render_every]
+
+          scene_option = mujoco.MjvOption()
+          scene_option.geomgroup[2] = True
+          scene_option.geomgroup[3] = False
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+          scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+          frames = env.render(
+              traj,
+              camera="track",
+              scene_option=scene_option,
+              width=640,
+              height=480,
+          )
+
+          # media.show_video(frames, fps=fps, loop=False)
+          # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 train.py
+          media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4', frames, fps=fps)
+          print('Video saved')
 
     if eval_i == eval_frequency:
       break
