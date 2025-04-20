@@ -2,11 +2,15 @@ from typing import Union
 
 import numpy as np
 import mujoco
-from mujoco import mjx
-from flax import struct
 
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
+import time
+import os
+import sys
+import random
+import torch
+import gymnasium as gym
 
 def get_rz_np(
     phi: Union[np.ndarray, float],
@@ -85,12 +89,6 @@ def draw_joystick_command(
       from_=arrow_from,
       to=arrow_to,
   )
-
-import time
-import os
-import sys
-import random
-import torch
 
 def set_seed(seed: Optional[int] = None) -> int:
   ''' Taken from skrl '''
