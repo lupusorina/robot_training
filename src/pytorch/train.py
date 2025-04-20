@@ -182,7 +182,7 @@ def train(
     if progress_fn:
       t = time.time()
       with torch.no_grad():
-        episode_count, episode_reward = eval_unroll(eval_i, agent, envs, episode_length, obs_size)
+        episode_count, episode_reward, rollout_envs = eval_unroll(eval_i, agent, envs, episode_length, obs_size)
       duration = time.time() - t
       # TODO: only count stats from completed episodes
       episode_avg_length = num_envs * episode_length / episode_count
@@ -199,8 +199,11 @@ def train(
 
       # Visualize the rollout.
       render_video = True
-      for idx_env in range(envs.num_envs):
-        if render_video:
+      if render_video:
+        media_files_list = []
+        max_num_envs = np.min([envs.num_envs, 10]) # Avoid too many videos to save.
+        all_frames = []
+        for idx_env in range(max_num_envs):
           rollout_env = rollout_envs[f'rollout_env_{idx_env}']
 
           render_every = 1 # int.
@@ -222,10 +225,25 @@ def train(
               height=480,
           )
 
-          # media.show_video(frames, fps=fps, loop=False)
-          # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 train.py
+          # Save individual video
           media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4', frames, fps=fps)
-          print('Video saved')
+          media_files_list.append(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4')
+          all_frames.append(np.array(frames))  # Ensure frames are numpy arrays
+          print(f'Video nb {idx_env} saved')
+
+        # Arrange frames in a 2-row grid
+        num_videos = len(all_frames)
+        num_cols = (num_videos + 1) // 2  # Ceiling division
+        frame_shape = all_frames[0].shape
+        final_frames = np.zeros((frame_shape[0], frame_shape[1] * 2, frame_shape[2] * num_cols, frame_shape[3]), dtype=all_frames[0].dtype)
+
+        for i, frames in enumerate(all_frames):
+            row = i // num_cols
+            col = i % num_cols
+            final_frames[:, row*frame_shape[1]:(row+1)*frame_shape[1],
+                        col*frame_shape[2]:(col+1)*frame_shape[2]] = frames
+
+        media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_envs_epoch_{eval_i}.mp4', final_frames, fps=fps)
 
     if eval_i == eval_frequency:
       break
