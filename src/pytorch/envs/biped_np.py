@@ -737,15 +737,27 @@ if __name__ == "__main__":
     env = Biped(visualize=False)
     env.reset()
 
+    # Get all the actuator names.
+    actuator_names = [env._mj_model.actuator(i).name for i in range(env._mj_model.nu)]
+    print(actuator_names)
+
+    # Get the actuator index.
+    for name in actuator_names:
+        act_id = env._mj_model.actuator(name=name)
+        print(name, act_id.gainprm[0])
+
+    for i in range(env._mj_model.nu):
+        print(env._mj_model.actuator_gainprm[i][0])
+
     rollout = []
 
     for _ in tqdm.tqdm(range(1000)):
         action = np.zeros(env.action_size)
         priviliged_obs, rewards, done, _, _ = env.step(action)
         state = {
-            'qpos': env.data.qpos.copy(),
-            'qvel': env.data.qvel.copy(),
-            'xfrc_applied': env.data.xfrc_applied.copy()
+            'qpos': env.data.qpos,
+            'qvel': env.data.qvel,
+            'xfrc_applied': env.data.xfrc_applied
         }
         rollout.append(state)
 
