@@ -68,7 +68,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         for i in range(model.nu):
             kp_nominal = model.actuator_gainprm[i][0]
             rng, key = jax.random.split(rng)
-            dkp = jax.random.uniform(key, minval=-0.1, maxval=0.1)
+            dkp = jax.random.uniform(key, minval=-0.5, maxval=0.5)
             actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal + dkp)
 
         return (
