@@ -242,8 +242,8 @@ class Biped(gym.Env):
         qvel[0:6] = np.random.uniform(-0.5, 0.5, 6)
 
         # Initialize data.
-        self.data.qpos = qpos
-        self.data.qvel = qvel
+        self.data.qpos = qpos.copy()
+        self.data.qvel = qvel.copy()
 
         # Phase and gait.
         gait_freq = np.random.uniform(1.25, 1.5)
@@ -266,10 +266,13 @@ class Biped(gym.Env):
             "push": np.zeros(2),
             "push_step": 0,
             # "push_interval_steps": push_interval_steps
+            "qpos": self.data.qpos,
+            "qvel": self.data.qvel,
+            "xfrc_applied": self.data.xfrc_applied
         }
         priviliged_observation = self._get_priviliged_obs(contact=np.zeros(2))
         mujoco.mj_step(self._mj_model, self.data)
-        return priviliged_observation, {}
+        return priviliged_observation, self.info
 
     def get_privileged_observation(self):
         return self._privileged_state
@@ -339,6 +342,9 @@ class Biped(gym.Env):
         self.info["feet_air_time"] *= ~contact
         self.info["last_contact"] = contact
         self.info["swing_peak"] *= ~contact
+        self.info["qpos"] = self.data.qpos
+        self.info["qvel"] = self.data.qvel
+        self.info["xfrc_applied"] = self.data.xfrc_applied
 
         # return observation, reward, terminated, False, info
         return priviliged_observation, reward, done, False, self.info
@@ -355,7 +361,7 @@ class Biped(gym.Env):
         )
 
         # Gravity.
-        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3).copy()
+        R_gravity_sensor = self.data.site_xmat[self._imu_site_id].reshape(3, 3)
         gravity = R_gravity_sensor.T @ np.array([0, 0, -1]) # TODO: check this
         noisy_gravity = (
             gravity
@@ -365,7 +371,7 @@ class Biped(gym.Env):
         )
 
         # Joint angles.
-        joint_angles = self.data.qpos[7:].copy()
+        joint_angles = self.data.qpos[7:]
         noisy_joint_angles = (
             joint_angles
             + (2 * np.random.uniform(size=joint_angles.shape) - 1)
@@ -518,7 +524,7 @@ class Biped(gym.Env):
       sensor_id = self._mj_model.sensor(sensor_name).id
       sensor_adr = self._mj_model.sensor_adr[sensor_id]
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim].copy()
+      return self.data.sensordata[sensor_adr : sensor_adr + sensor_dim]
 
     @property
     def action_size(self) -> int:
@@ -614,10 +620,9 @@ class Biped(gym.Env):
                              info) -> np.ndarray:
         del info  # Unused.
         feet_vel = self.data.sensordata[self._foot_linvel_sensor_adr]
-        feet_vel = feet_vel.copy() # Add copy here
         vel_xy = feet_vel[..., :2]
         vel_norm = np.sqrt(np.linalg.norm(vel_xy, axis=-1))
-        foot_pos = self.data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id]
         foot_z = foot_pos[..., -1]
         delta = np.abs(foot_z - self._config.reward_config.max_foot_height)
         return np.sum(delta * vel_norm)
@@ -655,7 +660,7 @@ class Biped(gym.Env):
     ) -> np.ndarray:
         # Reward for tracking the desired foot height.
         del commands  # Unused.
-        foot_pos = self.data.site_xpos[self._feet_site_id].copy()
+        foot_pos = self.data.site_xpos[self._feet_site_id]
         foot_z = foot_pos[..., -1]
         rz = utils.get_rz_np(phase, swing_height=foot_height)
         error = np.sum(np.square(foot_z - rz))
