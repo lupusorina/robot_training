@@ -39,7 +39,7 @@ from IPython.display import clear_output
 from matplotlib import pyplot as plt
 import numpy as np
 from ml_collections import config_dict
-from wrapper import wrap_for_brax_training
+from robot_learning.src.jax.wrapper import wrap_for_brax_training
 
 # Folders.
 RESULTS = 'results'
@@ -82,7 +82,7 @@ brax_ppo_config = config_dict.create(
 ppo_params = brax_ppo_config
 
 # Environment.
-from biped import Biped
+from robot_learning.src.jax.envs.biped import Biped
 env = Biped()
 eval_env = Biped()
 
@@ -129,7 +129,7 @@ train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),
     network_factory=network_factory,
     progress_fn=progress,
-    randomization_fn=domain_randomize,
+    # randomization_fn=domain_randomize,
     save_checkpoint_path=ABS_FOLDER_RESUlTS,
     # restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
 )

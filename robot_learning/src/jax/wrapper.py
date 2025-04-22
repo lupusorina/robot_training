@@ -22,7 +22,7 @@ from jax import numpy as jp
 import mujoco
 from mujoco import mjx
 
-import src.jax.mjx_env as mjx_env
+import robot_learning.src.jax.mjx_env as mjx_env
 
 ### For Brax.
 

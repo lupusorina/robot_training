@@ -248,7 +248,8 @@ def train(
     if eval_i == eval_frequency:
       break
 
-    envs.reset()
+    output_reset = envs.reset()
+    privileged_obs = output_reset[0]
 
     num_steps = batch_size * num_minibatches * unroll_length
     num_epochs = num_timesteps // (num_steps * eval_frequency)
@@ -348,4 +349,3 @@ if __name__ == '__main__':
   print(f'train steps/sec: {np.mean(train_sps)}')
 
   print('Training is done!')
-

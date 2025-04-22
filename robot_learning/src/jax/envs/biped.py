@@ -15,14 +15,14 @@ from mujoco.mjx._src import math
 import numpy as np
 
 # Local imports.
-import src.jax.utils as utils
-from src.jax.utils import geoms_colliding
-import src.jax.mjx_env as mjx_env
+import utils as utils
+from utils import geoms_colliding
+import robot_learning.src.jax.mjx_env as mjx_env
 
 # Constants.
 NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'biped':
-  import src.assets.biped.config as robot_config
+  import robot_learning.src.assets.biped.config as robot_config
 else:
   raise ValueError(f'NAME_ROBOT must be "biped"')
 print('NAME_ROBOT:', NAME_ROBOT)
@@ -100,11 +100,11 @@ def default_config() -> config_dict.ConfigDict:
       push_config=config_dict.create(
           enable=True,
           interval_range=[5.0, 10.0],
-          magnitude_range=[0.1, 2.0],
+          magnitude_range=[0.1, 0.2],
       ),
-      lin_vel_x=[-0.5, 0.5],
-      lin_vel_y=[-0.5, 0.5],
-      ang_vel_yaw=[-0.5, 0.5],
+      lin_vel_x=[-0.2, 0.2],
+      lin_vel_y=[-0.2, 0.2],
+      ang_vel_yaw=[-0.2, 0.2],
   )
 
 class Biped(mjx_env.MjxEnv):
@@ -300,6 +300,9 @@ class Biped(mjx_env.MjxEnv):
         "push": jp.array([0.0, 0.0]),
         "push_step": 0,
         "push_interval_steps": push_interval_steps,
+        "qpos": data.qpos,
+        "qvel": data.qvel,
+        "xfrc_applied": data.xfrc_applied,
     }
 
     # Initialize the metrics.
@@ -397,6 +400,9 @@ class Biped(mjx_env.MjxEnv):
     for k, v in rewards.items():
       state.metrics[f"reward/{k}"] = v
     state.metrics["swing_peak"] = jp.mean(state.info["swing_peak"])
+    state.info["xfrc_applied"] = data.xfrc_applied
+    state.info["qpos"] = data.qpos
+    state.info["qvel"] = data.qvel
 
     done = done.astype(reward.dtype)
     state = state.replace(data=data, obs=obs, reward=reward, done=done)

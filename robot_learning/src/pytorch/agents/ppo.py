@@ -20,14 +20,14 @@ class Agent(nn.Module):
     policy = []
     for w1, w2 in zip(policy_layers, policy_layers[1:]):
       policy.append(nn.Linear(w1, w2))
-      policy.append(nn.SiLU())
+      policy.append(nn.ReLU())
     policy.pop()  # drop the final activation
     self.policy = nn.Sequential(*policy)
 
     value = []
     for w1, w2 in zip(value_layers, value_layers[1:]):
       value.append(nn.Linear(w1, w2))
-      value.append(nn.SiLU())
+      value.append(nn.ReLU())
     value.pop()  # drop the final activation
     self.value = nn.Sequential(*value)
 

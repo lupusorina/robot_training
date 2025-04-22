@@ -15,8 +15,8 @@ import numpy as np
 
 import sys
 sys.path.append("../")
-import utils as utils
-from utils import geoms_colliding_np, get_rz_np
+import robot_learning.src.pytorch.utils_np as utils
+from robot_learning.src.pytorch.utils_np import geoms_colliding_np, get_rz_np
 import tqdm
 
 import mediapy as media
@@ -24,7 +24,7 @@ import mediapy as media
 
 NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'biped':
-    import src.assets.biped.config as robot_config
+    import robot_learning.src.assets.biped.config as robot_config
 else:
     raise ValueError(f'NAME_ROBOT must be "biped"')
 
@@ -760,9 +760,11 @@ if __name__ == "__main__":
             'xfrc_applied': env.data.xfrc_applied
         }
         rollout.append(state)
+    
+    print("Done")
 
     render_every = 1 # int.
-    fps = 1/ env.sim_dt / render_every
+    fps = 1/ env.ctrl_dt / render_every
     traj = rollout[::render_every]
 
     scene_option = mujoco.MjvOption()
@@ -780,8 +782,6 @@ if __name__ == "__main__":
         height=480,
     )
 
-    # media.show_video(frames, fps=fps, loop=False)
-    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
     # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 biped_np.py
     media.write_video(f'joystick_testing.mp4', frames, fps=fps)
     print('Video saved')
