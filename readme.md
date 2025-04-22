@@ -34,24 +34,25 @@ MUJOCO_GL=egl python3 train_DDPG.py
 ## File structure
 
 ```
-src
-    └── jax
-        └── biped.py                   (Biped in Jax)
-        └── train.py                   (Train PPO on Biped)
-        └── test.ipynb                 (Jupyter notebook for testing)
-        └── mjx_env.py                 (file taken from mujoco-playground and modified)
-        └── wrapper.py                 (file taken from mujoco-playground and modified)
-        └── randomize.py               (domain randomization)
-        └── utils.py                   (utils)
+robot_learning
+    └── src
+            └── jax
+                └── biped.py                   (Biped in Jax)
+                └── train.py                   (Train PPO on Biped)
+                └── test.ipynb                 (Jupyter notebook for testing)
+                └── mjx_env.py                 (file taken from mujoco-playground and modified)
+                └── wrapper.py                 (file taken from mujoco-playground and modified)
+                └── randomize.py               (domain randomization)
+                └── utils.py                   (utils)
 
-    └── pytorch
-        └── biped_np.py               (Biped in PyTorch)
-        └── train.py                   (Train PPO on Biped)
-        └── test.ipynb                 (Jupyter notebook for testing)
-        └── utils.py                   (utils)
-        
-    └── assets
-        └── biped                      (biped)
+            └── pytorch
+                └── biped_np.py               (Biped in PyTorch)
+                └── train.py                   (Train PPO on Biped)
+                └── test.ipynb                 (Jupyter notebook for testing)
+                └── utils.py                   (utils)
 
-tests
+            └── assets
+                └── biped                      (biped)
+
+    └── tests
 ```
