@@ -46,10 +46,10 @@ robot_learning
                 └── utils.py                   (utils)
 
             └── pytorch
-                └── biped_np.py               (Biped in PyTorch)
+                └── biped_np.py                (Biped in PyTorch)
                 └── train.py                   (Train PPO on Biped)
                 └── test.ipynb                 (Jupyter notebook for testing)
-                └── utils.py                   (utils)
+                └── utils_np.py                (utils)
 
             └── assets
                 └── biped                      (biped)
