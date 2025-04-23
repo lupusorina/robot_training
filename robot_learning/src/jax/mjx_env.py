@@ -199,9 +199,14 @@ def render_array(
 
   def get_image(state, modify_scn_fn=None) -> np.ndarray:
     d = mujoco.MjData(mj_model)
-    d.qpos, d.qvel = state.data.qpos, state.data.qvel
-    d.mocap_pos, d.mocap_quat = state.data.mocap_pos, state.data.mocap_quat
-    d.xfrc_applied = state.data.xfrc_applied
+
+    if isinstance(state, dict):
+      d.qpos, d.qvel = state['qpos'], state['qvel']
+      d.xfrc_applied = state['xfrc_applied']
+    else:
+      d.qpos, d.qvel = state.data.qpos, state.data.qvel
+      d.xfrc_applied = state.data.xfrc_applied
+
     mujoco.mj_forward(mj_model, d)
     renderer.update_scene(d, camera=camera, scene_option=scene_option)
     if modify_scn_fn is not None:
