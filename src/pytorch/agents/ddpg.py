@@ -70,7 +70,7 @@ class Agent(nn.Module):
 
   def __init__(self, policy_layers:Sequence[int],
                value_layers:Sequence[int], memory:ReplayBuffer,
-               discounting:float,tau:float, reward_scaling:float,
+               discounting:float,tau:float,
                action_limit:float, device:str):
     super(Agent, self).__init__()
     
@@ -99,15 +99,17 @@ class Agent(nn.Module):
 
     self.gamma = discounting
     self.tau = tau
-    self.act_lim = action_limit
-    self.reward_scaling = reward_scaling
+    if type(action_limit) is not torch.Tensor:
+      action_lim = torch.tensor(action_limit, dtype=torch.float32, device=device)
+    self.action_lim = action_lim
+
     self.device = device
 
     self.memory = memory
 
-  @classmethod
-  def action_postprocess(cls,x):
-    return cls.act_lim*torch.tanh(x)
+  @torch.jit.export
+  def action_postprocess(self,x):
+    return self.action_lim*torch.tanh(x)
   
   @torch.jit.export
   def get_action(self, observation):
@@ -126,11 +128,11 @@ class Agent(nn.Module):
     
     with torch.no_grad():
       next_action = self.action_postprocess(self.policy_t(next_observations))
-      next_value_input = torch.concatenate((next_observations,next_action), dim=1)
+      next_value_input = torch.cat((next_observations,next_action), dim=1)
       next_discounted_return = self.value_t(next_value_input)
       y = reward + (1-done_flag) * self.gamma * next_discounted_return
    
-    state_action_pair = torch.concatenate([observation,action], dim=1)
+    state_action_pair = torch.cat([observation,action], dim=1)
     discounted_return = self.value_b(state_action_pair)
     v_loss = F.mse_loss(input=discounted_return, target=y)
     return v_loss
@@ -140,7 +142,7 @@ class Agent(nn.Module):
     observation = buffer_batch['observations']
 
     _,actions_b = self.get_action(observation)
-    state_action_pair = torch.concatenate([observation,actions_b], dim=1)
+    state_action_pair = torch.cat([observation,actions_b], dim=1)
     critic_values = self.value_b(state_action_pair)
     p_loss = -critic_values.mean()
     return p_loss
