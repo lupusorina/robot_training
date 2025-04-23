@@ -234,7 +234,6 @@ class VectorGymWrapper(gym.vector.VectorEnv):
 
   def step(self, action):
     self._state, obs, reward, terminated, info = self._step(self._state, action)
-    # truncated = jax.numpy.zeros_like(terminated) # No truncation in the env.
     return obs, reward, terminated, None, info
 
   def seed(self, seed: int = 0):
