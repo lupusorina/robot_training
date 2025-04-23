@@ -15,6 +15,11 @@ cd brax
 pip3 install -e .
 ```
 
+## Install the repo
+
+```
+pip3 install -e .
+```
 
 ## Run biped training code in Jax
 
@@ -24,12 +29,7 @@ python3 train.py
 ```
 Inference: test.ipynb
 
-## Run biped training DDPG
 
-```
-cd src/pytorch
-MUJOCO_GL=egl python3 train_DDPG.py
-```
 
 ## File structure
 
