@@ -27,8 +27,6 @@ from robot_learning.src.pytorch.utils_np import AutoResetWrapper
 from robot_learning.src.pytorch.utils_np import VectorGymWrapper
 import robot_learning.src.pytorch.utils_np as utils_np
 
-from robot_learning.src.jax.envs.biped import Biped
-
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
     os.makedirs(RESULTS)
@@ -81,7 +79,6 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
         'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
       })
 
-  print('End of eval unroll')
   return episodes, episode_reward / episodes, rollout_envs
 
 
@@ -112,7 +109,7 @@ def train_unroll(agent: Agent, obs_dict: torch.Tensor, env: gym.Env, num_unrolls
   return td
 
 def train(
-    env_name: str = 'biped',
+    env_name: str = 'ant',
     num_envs: int = 8192,
     episode_length: int = 1000,
     device: str = 'cuda',
@@ -134,7 +131,15 @@ def train(
 
   # Here we create a wrapper to convert the jax env to a gym env.
   # Create the environment [jax env].
-  env = Biped()
+  if env_name == 'biped':
+    from robot_learning.src.jax.envs.biped import Biped
+    env = Biped()
+  elif env_name == 'ant':
+    from robot_learning.src.jax.envs.ant import Ant
+    env = Ant()
+  else:
+    raise ValueError(f'Environment {env_name} not supported')
+
   ctrl_dt = env.ctrl_dt
   render_fn = env.render
 
