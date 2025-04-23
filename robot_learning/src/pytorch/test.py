@@ -8,47 +8,76 @@ import mediapy as media
 
 import numpy as np
 
-# Define environment.
-env_name = 'biped'
-if env_name == 'ant':
-    env = gym.make("Ant-v5", render_mode='rgb_array')
-    obs_size = env.observation_space.shape[0]
-    privileged_obs_size = env.observation_space.shape[0]
-    print(f'Observation size: {obs_size}')
-    print(f'Privileged observation size: {privileged_obs_size}')
-    print(f'Action size: {env.action_space.shape[-1]}')
-elif env_name == 'biped':
-    from envs.biped_np import Biped
-    env = Biped()
-    obs_size = env.observation_size[0]
-    output = env.reset()
-    print(output)
-    privileged_obs_size = output[0].shape[0]
-    print(f'Observation size: {obs_size}')
-    print(f'Privileged observation size: {privileged_obs_size}')
-    print(f'Action size: {env.action_space.shape[-1]}')
-else:
-    raise ValueError(f"Environment {env_name} not supported")
+from robot_learning.src.pytorch.utils_np import TorchWrapper
+from robot_learning.src.pytorch.utils_np import EpisodeWrapper
+from robot_learning.src.pytorch.utils_np import VmapWrapper
+from robot_learning.src.pytorch.utils_np import AutoResetWrapper
+from robot_learning.src.pytorch.utils_np import VectorGymWrapper
+import robot_learning.src.pytorch.utils_np as utils_np
 
-# Load policy.
+import jax
+import jax.random
+
+from robot_learning.src.jax.envs.biped import Biped
+
+# Policy path.
 ABS_FOLDER_RESUlTS = os.path.abspath('results')
 folders = sorted(os.listdir(ABS_FOLDER_RESUlTS))
 latest_folder = folders[-1]
 FULL_PATH = os.path.join(ABS_FOLDER_RESUlTS, latest_folder)
 print(f'Latest folder: {FULL_PATH}')
 
-# Create the agent.
-policy_layers = [obs_size, 256, 128, 64, env.action_space.shape[-1] * 2]
-value_layers = [privileged_obs_size, 256, 128, 64, 1]
+# Device.
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-agent = Agent(policy_layers, value_layers)
-agent.policy.load_state_dict(torch.load(os.path.join(FULL_PATH, 'ppo_model_pytorch.pth')))
+auto_reset = True
+
+# Load environment.
+env_name = 'biped'
+env = Biped()
+ctrl_dt = env.ctrl_dt
+render_fn = env.render
+
+# Batch the environment.
+env = VmapWrapper(env, batch_size=1)
+
+# Automatically reset the environment at episode end.
+if auto_reset:
+    env = AutoResetWrapper(env)
+
+# Convert the jax env to a gym env.
+env = VectorGymWrapper(env)
+action_size = env.action_space.shape[-1]
+
+# Convert the gym env to a torch env.
+env = TorchWrapper(env, device=device)
+
+obs = env.reset()
+priviliged_state_size = obs['privileged_state'].shape[-1]
+obs_size = obs['state'].shape[-1]
+
+# Create the agent.
+policy_layers = [obs_size, 256, 128, action_size * 2]
+value_layers = [priviliged_state_size, 256, 128, 1]
+
+agent = Agent(policy_layers, value_layers, device=device)
+agent.policy.load_state_dict(torch.load(os.path.join(FULL_PATH, 'ppo_model_pytorch_9.pth')))
+
+# Set to evaluation mode.
+agent.policy.eval()
+
+# Put policy to device.
+agent.policy.to(device)
+
+out = env.reset()
+privileged_obs = out['privileged_state']
+obs = out['state']
+
+print('Sizes   priviliged state', priviliged_state_size)
+print('        action', action_size)
+print('        observation', obs_size)
 
 # Test policy.
-out = env.reset()
-privileged_obs = out[0]
-obs = env.get_observation()
-
 time_counter = 0
 time_list = []
 frames = []
@@ -57,37 +86,36 @@ rollout = []
 episodes = 0
 episode_reward = 0
 
+done_switch = []
+
+print_next_step = False
+
 for i in range(1000):
-    obs_tensor = torch.tensor(obs, dtype=torch.float32)
+    print('i = ', i)
+    obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device)
     _, action = agent.get_logits_action(obs_tensor)
-    priviliged_obs, rewards, done, _, _ = env.step(Agent.dist_postprocess(action).detach().numpy())
-    obs = env.get_observation()
+    sampled_action = Agent.dist_postprocess(action)
+    obs_dict, rewards, done, _, info = env.step(sampled_action)
+    obs = obs_dict['state']
+
     state = {
-        'qpos': env.data.qpos.copy(),
-        'qvel': env.data.qvel.copy(),
-        'xfrc_applied': env.data.xfrc_applied.copy()
+        'qpos': info['qpos'].cpu().numpy(), 
+        'qvel': info['qvel'].cpu().numpy(),
+        'xfrc_applied': info['xfrc_applied'].cpu().numpy()
     }
 
     rollout.append(state)
 
     # Keep track of time.
-    time_counter += env.ctrl_dt
+    time_counter += ctrl_dt
 
     # Save data.
     time_list.append(time_counter)
-    
-    # Metrics.
-    episodes += np.sum(done)
-    episode_reward += np.sum(rewards)
-
-print(f'Episodes: {episodes}')
-print(f'Episode reward: {episode_reward}')
-print(f'Average reward: {episode_reward / episodes}')
 
 render_video = True
 if render_video:
     render_every = 1 # int.
-    fps = 1/ env.ctrl_dt / render_every
+    fps = 1/ ctrl_dt / render_every
 
     traj = rollout[::render_every]
 
@@ -98,7 +126,7 @@ if render_video:
     scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
     scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
 
-    frames = env.render(
+    frames = render_fn(
         traj,
         camera="track",
         scene_option=scene_option,
@@ -106,8 +134,6 @@ if render_video:
         height=480,
     )
 
-    # media.show_video(frames, fps=fps, loop=False)
-    # ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
     # NOTE: To make the code run, you need to call: MUJOCO_GL=egl python3 test.py
     media.write_video(f'{FULL_PATH}/joystick_testing.mp4', frames, fps=fps)
     print('Video saved')
