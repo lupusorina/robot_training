@@ -15,9 +15,11 @@ from mujoco.mjx._src import math
 import numpy as np
 
 # Local imports.
-import utils as utils
-from utils import geoms_colliding
+import robot_learning.src.jax.utils as utils
+from robot_learning.src.jax.utils import geoms_colliding
 import robot_learning.src.jax.mjx_env as mjx_env
+
+import time
 
 # Constants.
 NAME_ROBOT = 'biped'
@@ -144,6 +146,7 @@ class Biped(mjx_env.MjxEnv):
     for i in range(0, self.mj_model.nu):  # skip root
         self.name_actuators.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i))
     print(self.name_actuators)
+    print('self.mj_model.nu', self.mj_model.nu)
 
     # Used for logging.
     self.state_header = ['noisy_vel_x', 'noisy_vel_y', 'noisy_vel_z', # 3 noisy_linvel
@@ -174,7 +177,7 @@ class Biped(mjx_env.MjxEnv):
     self.upper_limit_ctrl = np.array(self._soft_q_j_max)
 
     # Initialize the noise scale.
-    q_j_noise_scale = np.zeros(10) # For joint noise.
+    q_j_noise_scale = np.zeros(self.mj_model.nu) # For joint noise.
 
     hip_indices = []
     hip_joint_names = robot_config.HIP_JOINT_NAMES
@@ -247,12 +250,12 @@ class Biped(mjx_env.MjxEnv):
     # qpos[7:]=*U(0.5, 1.5)
     rng, key = jax.random.split(rng)
     qpos = qpos.at[7:].set(
-      qpos[7:] * jax.random.uniform(key, (10,), minval=-0.2, maxval=0.2))
+      qpos[7:] * jax.random.uniform(key, (self.mj_model.nu, ), minval=-0.1, maxval=0.1))
 
     # d(xyzrpy)=U(-0.5, 0.5)
     rng, key = jax.random.split(rng)
     qvel = qvel.at[0:6].set(
-      jax.random.uniform(key, (6,), minval=-1.0, maxval=1.0))
+      jax.random.uniform(key, (6,), minval=-0.1, maxval=0.1))
 
     # Initialize the data.
     data = mjx.make_data(self.mjx_model)
@@ -750,10 +753,87 @@ class Biped(mjx_env.MjxEnv):
     return int(round(self.ctrl_dt / self._sim_dt))
 
 
-def main():
-  env = Biped()
-  print(env.state_header)
-  print(env.ctrl_header)
+from robot_learning.src.jax.utils import draw_joystick_command
+import functools
+import mediapy as media
 
 if __name__ == "__main__":
-  main()
+
+  eval_env = Biped()
+  jit_reset = jax.jit(eval_env.reset)
+  jit_step = jax.jit(eval_env.step)
+  print(f'JITing reset and step')
+  rng = jax.random.PRNGKey(1)
+
+  rollout = []
+  modify_scene_fns = []
+
+  x_vel = 0.0  #@param {type: "number"}
+  y_vel = 0.2  #@param {type: "number"}
+  yaw_vel = 0.0  #@param {type: "number"}
+  command = jp.array([x_vel, y_vel, yaw_vel])
+
+  phase_dt = 2 * jp.pi * eval_env.ctrl_dt * 1.5
+  phase = jp.array([0, jp.pi])
+
+  state = jit_reset(rng)
+  state.info["phase_dt"] = phase_dt
+  state.info["phase"] = phase
+
+  # create a df to store the state.metrics data
+  metrics_list = []
+  ctrl_list = []
+  state_list = []
+  for i in range(1400):
+    print(i)
+    time_duration = time.time()
+
+    ctrl = jp.zeros(eval_env.action_size)
+    state = jit_step(state, ctrl)
+    state_list.append(state.obs["state"])
+    metrics_list.append(state.metrics)
+    if state.done:
+      break
+    state.info["command"] = command
+    rollout.append(state)
+
+    xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
+    xyz += np.array([0.0, 0.0, 0.0])
+    x_axis = state.data.xmat[eval_env._torso_body_id, 0]
+    yaw = -np.arctan2(x_axis[1], x_axis[0])
+    modify_scene_fns.append(
+        functools.partial(
+            draw_joystick_command,
+            cmd=state.info["command"],
+            xyz=xyz,
+            theta=yaw,
+            scl=np.linalg.norm(state.info["command"]),
+        )
+    )
+    time_diff = time.time() - time_duration
+
+  render_every = 1
+  fps = 1.0 / eval_env.ctrl_dt / render_every
+  print(f"fps: {fps}")
+  traj = rollout[::render_every]
+  mod_fns = modify_scene_fns[::render_every]
+
+  scene_option = mujoco.MjvOption()
+  scene_option.geomgroup[2] = True
+  scene_option.geomgroup[3] = False
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+  frames = eval_env.render(
+      traj,
+      camera="track",
+      scene_option=scene_option,
+      width=640,
+      height=480,
+      modify_scene_fns=mod_fns,
+  )
+
+  # media.show_video(frames, fps=fps, loop=False)
+  media.write_video(f'joystick_testing_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
+  print('Video saved')
