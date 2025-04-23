@@ -60,7 +60,6 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
 
   # Get the observation from the privileged observation (first part)
   obs = output_reset['state']
-  obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
 
@@ -71,10 +70,6 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
     _, action = agent.get_logits_action(obs)
     obs_dict, reward, done, _, info = envs.step(Agent.dist_postprocess(action))
     obs = obs_dict['state']
-
-    obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
-    done = torch.tensor(done, device=agent.device, dtype=torch.float32)
-    reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
     
@@ -98,28 +93,20 @@ def train_unroll(agent: Agent, obs_dict: torch.Tensor, env: gym.Env, num_unrolls
 
     obs = obs_dict['state']
     privileged_obs = obs_dict['privileged_state']
-    obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
-    privileged_obs = torch.tensor(privileged_obs, device=agent.device, dtype=torch.float32)
 
     one_unroll = StepData([obs], [privileged_obs], [], [], [], [], [])
     for _ in range(unroll_length):
       logits, action = agent.get_logits_action(obs)
-      obs_dict, reward, done, _, _ = env.step(Agent.dist_postprocess(action))
+      obs_dict, reward, done, _, info = env.step(Agent.dist_postprocess(action))
       obs = obs_dict['state']
       privileged_obs = obs_dict['privileged_state']
-      obs = torch.tensor(obs, device=agent.device, dtype=torch.float32)
-      privileged_obs = torch.tensor(privileged_obs, device=agent.device, dtype=torch.float32)
-
-      reward = torch.tensor(reward, device=agent.device, dtype=torch.float32)
-      done = torch.tensor(done, device=agent.device, dtype=torch.float32)
-      truncation = torch.tensor(done, device=agent.device, dtype=torch.float32) # TODO: fix so it is not done
       one_unroll.observation.append(obs)
       one_unroll.privileged_observation.append(privileged_obs)
       one_unroll.logits.append(logits)
       one_unroll.action.append(action)
       one_unroll.reward.append(reward)
       one_unroll.done.append(done)
-      one_unroll.truncation.append(truncation)
+      one_unroll.truncation.append(info['truncation'])
     one_unroll = sd_map(torch.stack, one_unroll)
     sd = sd_map(lambda x, y: x + [y], sd, one_unroll)
   td = sd_map(torch.stack, sd)
