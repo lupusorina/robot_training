@@ -72,15 +72,14 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
     obs = obs_dict['state']
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
-    
+
     # Save the state for plotting.
-    # for i in range(np.min([num_envs, 10])):
-    #   print(f'rollout_env_{i}')
-    #   rollout_envs[f'rollout_env_{i}'].append({
-    #     'qpos': info['qpos'][i].cpu().numpy(),
-    #     'qvel': info['qvel'][i].cpu().numpy(),
-    #     'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
-    #   })
+    for i in range(np.min([num_envs, 10])):
+      rollout_envs[f'rollout_env_{i}'].append({
+        'qpos': info['qpos'][i].cpu().numpy(),
+        'qvel': info['qvel'][i].cpu().numpy(),
+        'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
+      })
 
   print('End of eval unroll')
   return episodes, episode_reward / episodes, rollout_envs
@@ -218,7 +217,7 @@ def train(
       progress_fn(total_steps, progress)
 
       # Visualize the rollout.
-      render_video = False
+      render_video = True
       if render_video:
         media_files_list = []
         max_num_envs = np.min([num_envs, 10]) # Avoid too many videos to save.
@@ -246,8 +245,8 @@ def train(
           )
 
           # Save individual video
-          media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4', frames, fps=fps)
-          media_files_list.append(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_{idx_env}_epoch_{eval_i}.mp4')
+          # media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_epoch_{eval_i}_idx_env_{idx_env}.mp4', frames, fps=fps)
+          media_files_list.append(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_epoch_{eval_i}_idx_env_{idx_env}.mp4')
           all_frames.append(np.array(frames))  # Ensure frames are numpy arrays
           print(f'Video nb {idx_env} saved')
 
@@ -321,7 +320,7 @@ def train(
 
     # Save the model
     print(f'saving model at {total_steps}')
-    torch.save(agent.policy.state_dict(), ABS_FOLDER_RESUlTS + '/ppo_model_pytorch.pth')
+    torch.save(agent.policy.state_dict(), ABS_FOLDER_RESUlTS + f'/ppo_model_pytorch_{eval_i}.pth')
 
 def progress(num_steps, metrics):
   print(f'steps: {num_steps}, \
