@@ -46,6 +46,8 @@ class Agent(nn.Module):
     self.epsilon = clip_epsilon
     self.device = device
 
+    self.normalize_advantage = True
+
   @torch.jit.export
   def dist_create(self, logits):
     """Normal followed by tanh.
@@ -174,6 +176,9 @@ class Agent(nn.Module):
           reward=reward,
           values=baseline,
           bootstrap_value=bootstrap_value)
+
+    if self.normalize_advantage:
+      advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     rho_s = torch.exp(target_action_log_probs - behaviour_action_log_probs)
     surrogate_loss1 = rho_s * advantages
