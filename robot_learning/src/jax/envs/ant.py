@@ -146,27 +146,26 @@ class Ant(mjx_env.MjxEnv):
     if qvel is not None:
       data = data.replace(qvel=qvel)
     if qpos[7:] is not None:
-      data = data.replace(ctrl=qpos[7:])
+      data = data.replace(ctrl=jp.zeros(self.mj_model.nu))
     data = mjx.forward(self.mjx_model, data)
 
     # Initialize the observation.
     obs = self._get_obs(data)
 
     # Initialize the reward and done.
-    reward, done, zero = jp.zeros(3)
+    reward, done = jp.zeros(2)
     
     # Initialize the metrics.
     metrics = {
-        'reward_forward': zero,
-        'reward_survive': zero,
-        'reward_ctrl': zero,
-        'reward_contact': zero,
-        'x_position': zero,
-        'y_position': zero,
-        'distance_from_origin': zero,
-        'x_velocity': zero,
-        'y_velocity': zero,
-        'forward_reward': zero,
+        'reward_forward': jp.array(0.0, dtype=jp.float32),
+        'reward_survive': jp.array(0.0, dtype=jp.float32),
+        'reward_ctrl': jp.array(0.0, dtype=jp.float32),
+        'reward_contact': jp.array(0.0, dtype=jp.float32),
+        'x_position': jp.array(0.0, dtype=jp.float32),
+        'y_position': jp.array(0.0, dtype=jp.float32),
+        'distance_from_origin': jp.array(0.0, dtype=jp.float32),
+        'x_velocity': jp.array(0.0, dtype=jp.float32),
+        'y_velocity': jp.array(0.0, dtype=jp.float32),
     }
 
     # Initialize the info.
@@ -195,7 +194,8 @@ class Ant(mjx_env.MjxEnv):
     state.info["xfrc_applied"] = data.xfrc_applied
 
     # Compute the reward.
-    velocity = (data.xpos[0:2] - state.data.xpos[0:2]) / self._sim_dt
+    velocity = (data.qpos[0:2] - state.data.qpos[0:2]) / self._sim_dt
+    # jax.debug.print("velocity: {}", velocity)
     forward_reward = velocity[0]
 
     min_z, max_z = self._healthy_z_range
@@ -216,21 +216,20 @@ class Ant(mjx_env.MjxEnv):
     done = 1.0 - is_healthy if self._terminate_when_unhealthy else 0.0
     done = done.astype(reward.dtype)
 
-    # Update the metrics.
-    state.metrics.update(
-        reward_forward=forward_reward,
-        reward_survive=healthy_reward,
-        reward_ctrl=-ctrl_cost,
-        reward_contact=-contact_cost,
-        x_position=data.xpos[0],
-        y_position=data.xpos[1],
-        distance_from_origin=math.norm(data.xpos[0:2]),
-        x_velocity=velocity[0],
-        y_velocity=velocity[1],
-        forward_reward=forward_reward,
-    )
-    
-    state = state.replace(data=data, obs=obs, reward=reward, done=done)
+    # Update the metrics with scalar values
+    metrics = {
+        'reward_forward': forward_reward,
+        'reward_survive': healthy_reward,
+        'reward_ctrl': -ctrl_cost,
+        'reward_contact': -contact_cost,
+        'x_position': data.qpos[0],
+        'y_position': data.qpos[1],
+        'distance_from_origin': math.norm(data.qpos[0:2]),
+        'x_velocity': velocity[0],
+        'y_velocity': velocity[1],
+    }
+
+    state = state.replace(data=data, obs=obs, reward=reward, done=done, metrics=metrics)
     return state
 
   def _get_obs(self, data: mjx.Data) -> jax.Array:
@@ -241,7 +240,10 @@ class Ant(mjx_env.MjxEnv):
     if self._exclude_current_positions_from_observation:
       qpos = data.qpos[2:]
 
-    state = jp.concatenate([qpos] + [qvel])
+    state = jp.hstack([
+                qpos,
+                qvel
+            ])
 
     return {
       "state": state,
