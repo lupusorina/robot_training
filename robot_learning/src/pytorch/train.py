@@ -159,8 +159,9 @@ def train(
   obs_size = obs['state'].shape[-1]
 
   print('Sizes   priviliged state', priviliged_state_size)
-  print('        action', action_size)
   print('        observation', obs_size)
+  print('        action', action_size)
+  print('Device: ', device)
 
   # Create the agent.
   policy_layers = [obs_size, 256, 128, action_size * 2]
@@ -307,15 +308,19 @@ def progress(num_steps, metrics):
   times.append(datetime.now())
   xdata.append(num_steps)
   ydata.append(metrics['eval/episode_reward'].cpu().numpy())
+  # ydataerr.append(metrics["eval/episode_reward_std"].cpu().numpy())
+
   eval_sps.append(metrics['speed/eval_sps'])
   train_sps.append(metrics['speed/sps'])
-  clear_output(wait=True)
-  # plt.xlim([0, 30_000_000])
-  # plt.ylim([0, 2000])
-  plt.xlabel('# environment steps')
-  plt.ylabel('reward per episode')
-  plt.plot(xdata, ydata)
+  fig, ax = plt.subplots()
+  ax.set_xlabel('# environment steps')
+  ax.set_ylabel('reward per episode')
+  ax.plot(xdata, ydata)
+  # ax.fill_between(xdata, np.array(ydata) - np.array(ydataerr),
+  #                 np.array(ydata) + np.array(ydataerr), alpha=0.2)
+
   plt.savefig(ABS_FOLDER_RESUlTS + '/ppo_training.png')
+  print("Reward for {} steps: {:.3f}".format(num_steps, ydata[-1]))
 
   # save to pandas df
   df = pd.DataFrame({'x': xdata, 'y': ydata, 'eval_sps': eval_sps, 'train_sps': train_sps})
@@ -334,6 +339,7 @@ if __name__ == '__main__':
   print('Start the PPO training ...')
   xdata = []
   ydata = []
+  ydataerr = []
   eval_sps = []
   train_sps = []
   times = [datetime.now()]
