@@ -102,7 +102,7 @@ def default_config() -> config_dict.ConfigDict:
       push_config=config_dict.create(
           enable=True,
           interval_range=[5.0, 10.0],
-          magnitude_range=[0.1, 0.2],
+          magnitude_range=[0.05, 0.2],
       ),
       lin_vel_x=[-0.2, 0.2],
       lin_vel_y=[-0.2, 0.2],
@@ -255,7 +255,7 @@ class Biped(mjx_env.MjxEnv):
     # d(xyzrpy)=U(-0.5, 0.5)
     rng, key = jax.random.split(rng)
     qvel = qvel.at[0:6].set(
-      jax.random.uniform(key, (6,), minval=-0.1, maxval=0.1))
+      jax.random.uniform(key, (6,), minval=-1.0, maxval=1.0))
 
     # Initialize the data.
     data = mjx.make_data(self.mjx_model)
