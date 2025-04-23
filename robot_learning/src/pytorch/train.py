@@ -132,29 +132,6 @@ def train(
 ):
   """Trains a policy via PPO."""
 
-  # if env_name == 'ant':
-  #   env = gym.make("Ant-v5")
-  #   envs = gym.make_vec("Ant-v5",
-  #                    num_envs=num_envs,
-  #                    vectorization_mode="async", # Note sync is slow, so we use async
-  #                    )
-  #   obs_size = env.observation_space.shape[-1]
-  # elif env_name == 'pendulum':
-  #   env = gym.make("Pendulum-v1")
-  #   envs = gym.make_vec('Pendulum-v1',
-  #                      num_envs=num_envs,
-  #                      vectorization_mode="async", # Note sync is slow, so we use async
-  #                      )
-  #   obs_size = env.observation_space.shape[-1]
-  # elif env_name == 'biped':
-  #   from envs.biped_np import Biped
-  #   env = Biped()
-  #   envs = gym.make_vec('Biped-custom',
-  #                  num_envs=num_envs,
-  #                  vectorization_mode="async", # Note sync is slow, so we use async
-  #                  )
-  #   obs_size = env.observation_size[0]
-
   # Here we create a wrapper to convert the jax env to a gym env.
   # Create the environment [jax env].
   env = Biped()
