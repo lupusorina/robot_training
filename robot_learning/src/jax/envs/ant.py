@@ -270,14 +270,16 @@ class Ant(mjx_env.MjxEnv):
     """Number of sim steps per control step."""
     return int(round(self.ctrl_dt / self._sim_dt))
 
-from robot_learning.src.jax.utils import draw_joystick_command
-import functools
 import mediapy as media
 import numpy as np
+import os
 
 if __name__ == "__main__":
 
-  eval_env = Ant()
+  parent_dir = os.path.abspath(os.path.join(os.getcwd()))
+  xml_path = os.path.join(parent_dir, '../../assets/ant/xmls/ant.xml')
+
+  eval_env = Ant(xml_path=xml_path)
   jit_reset = jax.jit(eval_env.reset)
   jit_step = jax.jit(eval_env.step)
   print(f'JITing reset and step')
