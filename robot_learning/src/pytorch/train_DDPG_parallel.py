@@ -42,7 +42,7 @@ print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 def warm_up(env, warm_up_steps, memory, num_envs, action_size):
     """Warm up the replay buffer with random actions."""
     print(f"Warming up replay buffer with {warm_up_steps} steps...")
-    
+
     # Initialize empty trajectory data structure
     warm_up_td = None
 
@@ -52,52 +52,50 @@ def warm_up(env, warm_up_steps, memory, num_envs, action_size):
 
     warmup_rollout_envs = {
         f'rollout_env_{i}': [] for i in range(np.min([num_envs, 10]))
-    }
+        } # For video generation.
 
-    # Run environment steps
+    # Run environment steps.
     for step in range(warm_up_steps):
-        print(f"Warm up step {step} of {warm_up_steps}")
 
-        # Take random actions
+        # Take random actions.
         action = torch.randn((num_envs, action_size), device=env.device)
         action = torch.clamp(action, -1.0, 1.0)
 
-        # Step environment
+        # Step environment.
         next_obs_dict, reward, done, _, info = env.step(action)
         next_obs = next_obs_dict['state']
+        next_privileged_obs = next_obs_dict['privileged_state']
 
-        # Create trajectory data for this step
+        # Create trajectory data for this step (step_td -> step trajectory data).
         step_td = StepData(
-            obs=obs,
-            privileged_obs=privileged_obs,
-            next_obs=next_obs,
-            action=action,
-            reward=reward,
-            done=done,
-            truncation=info['truncation']
+            obs=obs,                                    # (num_envs, obs_dim)
+            privileged_obs=privileged_obs,              # (num_envs, privileged_obs_dim)
+            next_obs=next_obs,                          # (num_envs, obs_dim)
+            action=action,                              # (num_envs, action_dim)
+            reward=reward.unsqueeze(-1),                # (num_envs, 1)
+            done=done.unsqueeze(-1),                    # (num_envs, 1)
+            truncation=info['truncation'].unsqueeze(-1) # (num_envs, 1)
         )
 
         obs = next_obs.clone()
-        
-        # Save the state for plotting.
+        privileged_obs = next_privileged_obs.clone()
+
+        # Add to warm-up buffer.
+        if warm_up_td is None:
+            warm_up_td = step_td
+        else:
+            # Concatenate along the batch dimension.
+            def concat_buffers(old, new):
+                return torch.cat([old, new], dim=0)
+            warm_up_td = sd_map(concat_buffers, warm_up_td, step_td)
+
+        # Save the state for video generation.
         for i in range(np.min([num_envs, 10])):
             warmup_rollout_envs[f'rollout_env_{i}'].append({
                 'qpos': info['qpos'][i].cpu().numpy(),
                 'qvel': info['qvel'][i].cpu().numpy(),
                 'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
             })
-
-        # Add to warm-up buffer
-        if warm_up_td is None:
-            warm_up_td = step_td
-        else:
-            # Concatenate along the batch dimension
-            def concat_buffers(old, new):
-                return torch.cat([old, new], dim=0)
-            warm_up_td = sd_map(concat_buffers, warm_up_td, step_td)
-
-            # Print current size of warm_up_td
-            print(f"Current size of warm_up_td: {warm_up_td.obs.shape[0]}")
 
     # Add warm-up data to memory
     memory.add_trajectory_data(warm_up_td)
@@ -111,9 +109,8 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: in
   print('In eval unroll')
   print('num_envs', num_envs)
   output_reset = envs.reset()
-
-  # Get the observation from the privileged observation (first part)
   obs = output_reset['state']
+
   episodes = torch.zeros((), device=agent.device)
   episode_reward = torch.zeros((), device=agent.device)
 
@@ -122,8 +119,9 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: in
   }
   for _ in range(length):
     _, action = agent.get_logits_action(obs)
-    obs_dict, reward, done, _, info = envs.step(agent.action_postprocess(action))
-    obs = obs_dict['state']
+    next_obs_dict, reward, done, _, info = envs.step(agent.action_postprocess(action))
+    next_obs = next_obs_dict['state']
+
     episodes += torch.sum(done)
     episode_reward += torch.sum(reward)
 
@@ -134,6 +132,7 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: in
         'qvel': info['qvel'][i].cpu().numpy(),
         'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
       })
+    obs = next_obs.clone()
 
   return episodes, episode_reward / episodes, rollout_envs
 
@@ -151,7 +150,7 @@ def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, memory: ReplayB
     for _ in range(unroll_length):
         _, action = agent.get_logits_action(obs)
         next_obs_dict, reward, done, _, info = env.step(agent.action_postprocess(action))
-        
+
         next_obs = next_obs_dict['state']
         # Create trajectory data for this step
         step_td = StepData(
@@ -159,34 +158,31 @@ def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, memory: ReplayB
             privileged_obs=privileged_obs,
             next_obs=next_obs,
             action=action,
-            reward=reward,
-            done=done,
-            truncation=info['truncation']
+            reward=reward.unsqueeze(-1) ,
+            done=done.unsqueeze(-1),
+            truncation=info['truncation'].unsqueeze(-1)
         )
         obs = next_obs.clone()
         
-        # Add to warm-up buffer
+        # Add to buffer.
         if transitions_td is None:
             transitions_td = step_td
         else:
-            # Concatenate along the batch dimension
+            # Concatenate along the batch dimension.
             def concat_buffers(old, new):
                 return torch.cat([old, new], dim=0)
             transitions_td = sd_map(concat_buffers, transitions_td, step_td)
-
-            # Print current size of transitions_td
-            print(f"Current size of transitions_td: {transitions_td.obs.shape[0]}")
 
     return transitions_td
 
 
 def train(
     env_name: str = 'ant',
-    num_envs: int = 100,
+    num_envs: int = 32,
     episode_length: int = 1000,
     device: str = 'cuda',
     num_timesteps: int = 150_000_000,
-    warm_up_steps: int = 1,
+    warm_up_steps: int = 200,
     eval_frequency: int = 10,
     batch_size: int = 256,
     num_minibatches: int = 10,
@@ -194,8 +190,10 @@ def train(
     discounting: float = .99,
     action_repeat: int = 1,
     tau: float = 0.005,
-    learning_rate: float = 1e-3,
+    learning_rate: float = 5e-4,
     max_memory: int = 2_000_000,
+    gradient_steps: int = 10,
+    polyak_coeff: float = 0.005,
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
     """Trains a policy via DDPG."""
@@ -257,10 +255,16 @@ def train(
 
     if warm_up_steps:
         warmup_rollout_envs = warm_up(env, warm_up_steps, memory, num_envs, action_size)
-        render_video_warmups = False
+        render_video_warmups = True
         if render_video_warmups:
             print('Rendering warmup video ...')
-            generate_video(render_fn, warmup_rollout_envs, num_envs, ctrl_dt, 0, append_to_filename='warmup')
+            utils_np.generate_video(render_fn=render_fn,
+                                    rollout_envs=warmup_rollout_envs,
+                                    num_envs=num_envs,
+                                    ctrl_dt=ctrl_dt,
+                                    eval_i=0,
+                                    append_to_filename='warmup',
+                                    folder_name=ABS_FOLDER_RESUlTS)
     
     for eval_i in range(eval_frequency + 1):
         print(f'eval_i: {eval_i}/{eval_frequency+1}')
@@ -284,20 +288,27 @@ def train(
             progress_fn(total_steps, progress)
 
             # Visualize the rollout.
-            render_video = False
+            render_video = True
             if render_video:
-                generate_video(render_fn, rollout_envs, num_envs, ctrl_dt, eval_i)
+                print('Rendering eval video ...')
+                utils_np.generate_video(render_fn=render_fn,
+                                        rollout_envs=rollout_envs,
+                                        num_envs=num_envs,
+                                        ctrl_dt=ctrl_dt,
+                                        eval_i=eval_i,
+                                        folder_name=ABS_FOLDER_RESUlTS)
 
         if eval_i == eval_frequency:
             break
         print('Evaluation complete')
 
         # Training
+        print('Training ...')
         num_steps = batch_size * num_minibatches
         num_epochs = num_timesteps // (num_steps * eval_frequency)
         unroll_length = 10
 
-        print(num_epochs)
+        print('Number of epochs', num_epochs)
         total_v_loss = 0
         total_p_loss = 0
         t = time.time()
@@ -364,20 +375,20 @@ def progress(num_steps, metrics):
             train_sps: {metrics["speed/sps"]}')
     times.append(datetime.now())
     xdata.append(num_steps)
-    ydata.append(metrics['eval/episode_reward'].cpu())
-    eval_sps.append(metrics['speed/eval_sps'])
-    train_sps.append(metrics['speed/sps'])
+    ydata.append(metrics['eval/episode_reward'].cpu().numpy())
+    eval_sps.append(metrics['speed/eval_sps'].cpu().numpy())
+    train_sps.append(metrics['speed/sps'].cpu().numpy())
     clear_output(wait=True)
     plt.xlim([0, 30_000_000])
     plt.ylim([0, 2000])
     plt.xlabel('# environment steps')
     plt.ylabel('reward per episode')
     plt.plot(xdata, ydata)
-    plt.savefig(ABS_FOLDER_RESUlTS + '/ppo_training.png')
+    plt.savefig(ABS_FOLDER_RESUlTS + '/ddpg_training.png')
 
     # save to pandas df
     df = pd.DataFrame({'x': xdata, 'y': ydata, 'eval_sps': eval_sps, 'train_sps': train_sps})
-    df.to_csv(ABS_FOLDER_RESUlTS + '/ddpg_ant_training.csv', index=False)
+    df.to_csv(ABS_FOLDER_RESUlTS + '/ddpg_training.csv', index=False)
 
 
 if __name__ == '__main__':
