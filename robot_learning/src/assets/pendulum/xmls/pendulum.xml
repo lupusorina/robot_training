@@ -28,4 +28,12 @@
   <actuator>
     <motor name="torque" joint="hinge" gear="2" ctrlrange="-2 2" ctrllimited="true"/>
   </actuator>
+
+    <keyframe>
+    <key name="home"
+      qpos="0"
+      qvel="0"
+      ctrl="0.0"/>
+  </keyframe>
+
 </mujoco>
