@@ -315,3 +315,50 @@ class AutoResetWrapper(Wrapper):
     obs = jax.tree.map(where_done, state.info['first_obs'], state.obs)
     return state.replace(data=data, obs=obs)
 
+
+import mediapy as media
+
+def generate_video(render_fn, rollout_envs, num_envs, ctrl_dt, eval_i, append_to_filename='', folder_name=''):
+    max_num_envs = np.min([num_envs, 10]) # Avoid too many videos to save.
+    all_frames = []
+    for idx_env in range(max_num_envs):
+        rollout_env = rollout_envs[f'rollout_env_{idx_env}']
+
+        render_every = 1 # int.
+        fps = 1/ ctrl_dt / render_every
+        traj = rollout_env[::render_every]
+
+        scene_option = mujoco.MjvOption()
+        scene_option.geomgroup[2] = True
+        scene_option.geomgroup[3] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+        scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+        frames = render_fn(
+            traj,
+            camera="track",
+            scene_option=scene_option,
+            width=640,
+            height=480,
+        )
+
+        # Save individual video
+        all_frames.append(np.array(frames))  # Ensure frames are numpy arrays
+        print(f'Video nb {idx_env} saved')
+
+    # Arrange frames in a 2-row grid
+    num_videos = len(all_frames)
+    num_cols = (num_videos + 1) // 2  # Ceiling division
+    frame_shape = all_frames[0].shape
+    final_frames = np.zeros((frame_shape[0], frame_shape[1] * 2,
+                            frame_shape[2] * num_cols, frame_shape[3]),
+                            dtype=all_frames[0].dtype)
+
+    for i, frames in enumerate(all_frames):
+        row = i // num_cols
+        col = i % num_cols
+        final_frames[:, row*frame_shape[1]:(row+1)*frame_shape[1],
+                    col*frame_shape[2]:(col+1)*frame_shape[2]] = frames
+
+    media.write_video(f'{folder_name}/joystick_testing_epoch_{eval_i}_idx_env_{idx_env}_{append_to_filename}.mp4', final_frames, fps=fps)

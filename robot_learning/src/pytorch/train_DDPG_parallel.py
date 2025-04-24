@@ -38,54 +38,6 @@ ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
 FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
 
-def generate_video(render_fn, rollout_envs, num_envs, ctrl_dt, eval_i, append_to_filename=''):
-    media_files_list = []
-    max_num_envs = np.min([num_envs, 10]) # Avoid too many videos to save.
-    all_frames = []
-    for idx_env in range(max_num_envs):
-        rollout_env = rollout_envs[f'rollout_env_{idx_env}']
-
-        render_every = 1 # int.
-        fps = 1/ ctrl_dt / render_every
-        traj = rollout_env[::render_every]
-
-        scene_option = mujoco.MjvOption()
-        scene_option.geomgroup[2] = True
-        scene_option.geomgroup[3] = False
-        scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
-        scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
-        scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
-
-        frames = render_fn(
-            traj,
-            camera="track",
-            scene_option=scene_option,
-            width=640,
-            height=480,
-        )
-
-        # Save individual video
-        # media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_epoch_{eval_i}_idx_env_{idx_env}.mp4', frames, fps=fps)
-        media_files_list.append(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_env_epoch_{eval_i}_idx_env_{idx_env}_{append_to_filename}.mp4')
-        all_frames.append(np.array(frames))  # Ensure frames are numpy arrays
-        print(f'Video nb {idx_env} saved')
-
-    # Arrange frames in a 2-row grid
-    num_videos = len(all_frames)
-    num_cols = (num_videos + 1) // 2  # Ceiling division
-    frame_shape = all_frames[0].shape
-    final_frames = np.zeros((frame_shape[0], frame_shape[1] * 2,
-                            frame_shape[2] * num_cols, frame_shape[3]),
-                            dtype=all_frames[0].dtype)
-
-    for i, frames in enumerate(all_frames):
-        row = i // num_cols
-        col = i % num_cols
-        final_frames[:, row*frame_shape[1]:(row+1)*frame_shape[1],
-                    col*frame_shape[2]:(col+1)*frame_shape[2]] = frames
-
-    media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_idx_envs_epoch_{eval_i}.mp4', final_frames, fps=fps)
-
 
 def warm_up(env, warm_up_steps, memory, num_envs, action_size):
     """Warm up the replay buffer with random actions."""
