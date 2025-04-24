@@ -361,4 +361,22 @@ def generate_video(render_fn, rollout_envs, num_envs, ctrl_dt, eval_i, append_to
         final_frames[:, row*frame_shape[1]:(row+1)*frame_shape[1],
                     col*frame_shape[2]:(col+1)*frame_shape[2]] = frames
 
-    media.write_video(f'{folder_name}/joystick_testing_epoch_{eval_i}_idx_env_{idx_env}_{append_to_filename}.mp4', final_frames, fps=fps)
+    media.write_video(f'{folder_name}/joystick_testing_epoch_{eval_i}_{append_to_filename}.mp4', final_frames, fps=fps)
+
+
+class OUNoise:
+    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
+        self.action_dim = action_dim
+        self.mu = mu
+        self.theta = theta
+        self.sigma = sigma
+        self.state = np.ones(self.action_dim, dtype=np.float32) * self.mu
+
+    def reset(self):
+        self.state = np.ones(self.action_dim, dtype=np.float32) * self.mu
+
+    def sample(self):
+        dx = self.theta * (self.mu - self.state)
+        dx += self.sigma * np.random.randn(self.action_dim).astype(np.float32)
+        self.state += dx
+        return self.state
