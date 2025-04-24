@@ -2,11 +2,7 @@
 
 """Trains an ant to run in the +x direction."""
 
-from brax import base
 from brax import math
-from brax.envs.base import PipelineEnv, State
-from brax.io import mjcf
-from etils import epath
 from typing import Optional, Dict, Any, Union
 import time
 
