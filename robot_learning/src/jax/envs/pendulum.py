@@ -36,7 +36,8 @@ def default_config() -> config_dict.ConfigDict:
         ctrl_cost_weight=0.001,
         max_speed=8.0,
         max_torque=2.0,
-        reset_noise_scale=0.1,
+        reset_noise_scale_pos=0.4,
+        reset_noise_scale_vel=1.0,
       ),
   )
 
@@ -63,7 +64,8 @@ class Pendulum(mjx_env.MjxEnv):
     self._ctrl_cost_weight = config.reward_config.ctrl_cost_weight
     self._max_speed = config.reward_config.max_speed
     self._max_torque = config.reward_config.max_torque
-    self._reset_noise_scale = config.reward_config.reset_noise_scale
+    self._reset_noise_scale_pos = config.reward_config.reset_noise_scale_pos
+    self._reset_noise_scale_vel = config.reward_config.reset_noise_scale_vel
     self._exclude_current_positions_from_observation = config.exclude_current_positions_from_observation
 
     # Create the mjx model.
@@ -91,11 +93,11 @@ class Pendulum(mjx_env.MjxEnv):
     # Add noise to initial state
     rng, key = jax.random.split(rng)
     qpos = qpos.at[0].set(
-        jax.random.uniform(key, (), minval=-self._reset_noise_scale, maxval=self._reset_noise_scale))
+        jax.random.uniform(key, (), minval=-self._reset_noise_scale_pos, maxval=self._reset_noise_scale_pos))
     
     rng, key = jax.random.split(rng)
     qvel = qvel.at[0].set(
-        jax.random.uniform(key, (), minval=-self._reset_noise_scale, maxval=self._reset_noise_scale))
+        jax.random.uniform(key, (), minval=-self._reset_noise_scale_vel, maxval=self._reset_noise_scale_vel))
 
     # Initialize the data.
     data = mjx.make_data(self.mjx_model)
