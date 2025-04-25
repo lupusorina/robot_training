@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
   frames = eval_env.render(
       traj,
-      camera="lookat",
+      camera="track",
       scene_option=scene_option,
       width=640,
       height=480,
