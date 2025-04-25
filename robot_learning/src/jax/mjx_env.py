@@ -202,7 +202,6 @@ def render_array(
 
     if isinstance(state, dict):
       d.qpos, d.qvel = state['qpos'], state['qvel']
-      d.xfrc_applied = state['xfrc_applied']
     else:
       d.qpos, d.qvel = state.data.qpos, state.data.qvel
       d.xfrc_applied = state.data.xfrc_applied
