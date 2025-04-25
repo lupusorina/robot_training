@@ -51,7 +51,7 @@ def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
   return StepData(**items)
 
 
-def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: int, num_envs: int):
+def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: int):
   print('In eval unroll')
   """Return number of episodes and average reward for a single unroll."""
   output_reset = envs.reset()
@@ -76,7 +76,6 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, obs_size: in
       rollout_envs[f'rollout_env_{i}'].append({
         'qpos': info['qpos'][i].cpu().numpy(),
         'qvel': info['qvel'][i].cpu().numpy(),
-        'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
       })
 
   return episodes, episode_reward / episodes, rollout_envs
@@ -109,7 +108,7 @@ def train_unroll(agent: Agent, obs_dict: torch.Tensor, env: gym.Env, num_unrolls
   return td
 
 def train(
-    env_name: str = 'ant',
+    env_name: str = 'pendulum',
     num_envs: int = 8192,
     episode_length: int = 1000,
     device: str = 'cuda',
@@ -137,6 +136,9 @@ def train(
   elif env_name == 'ant':
     from robot_learning.src.jax.envs.ant import Ant
     env = Ant()
+  elif env_name == 'pendulum':
+    from robot_learning.src.jax.envs.pendulum import Pendulum
+    env = Pendulum()
   else:
     raise ValueError(f'Environment {env_name} not supported')
 
@@ -180,11 +182,12 @@ def train(
   total_steps = 0
   total_loss = 0
   for eval_i in range(eval_frequency + 1):
+    # Evaluate the policy.
     print(f'eval_i: {eval_i}')
     if progress_fn:
       t = time.time()
       with torch.no_grad():
-        episode_count, episode_reward, rollout_envs = eval_unroll(eval_i, agent, env, episode_length, obs_size, num_envs)
+        episode_count, episode_reward, rollout_envs = eval_unroll(eval_i, agent, env, episode_length, num_envs)
       duration = time.time() - t
       # TODO: only count stats from completed episodes
       episode_avg_length = num_envs * episode_length / episode_count
@@ -201,7 +204,7 @@ def train(
 
       # Visualize the rollout.
       render_video = True
-      if render_video:
+      if render_video == True: # and eval_i % 10 == 0:
         media_files_list = []
         max_num_envs = np.min([num_envs, 10]) # Avoid too many videos to save.
         all_frames = []
