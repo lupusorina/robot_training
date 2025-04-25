@@ -131,6 +131,10 @@ class Pendulum(mjx_env.MjxEnv):
 
     return mjx_env.State(data, obs, reward, done, metrics, info)
 
+  def _wrap_angle(self, angle: jax.Array) -> jax.Array:
+    """Wrap angle to be between -pi and pi."""
+    return jp.mod(angle + jp.pi, 2 * jp.pi) - jp.pi
+
   def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
     """Run one timestep of the environment's dynamics."""
     
@@ -145,12 +149,15 @@ class Pendulum(mjx_env.MjxEnv):
     state.info["qvel"] = data.qvel
 
     # Get the angle and angular velocity
-    angle = data.qpos[1]
-    angular_velocity = data.qvel[1]
-    
+    angle = self._wrap_angle(data.qpos[0])
+    angular_velocity = data.qvel[0]
+
     # Compute the reward (same as classic control pendulum)
     # The reward is -(theta^2 + 0.1*theta_dt^2 + 0.001*action^2)
-    swingup_reward = -(angle**2 + 0.1 * angular_velocity**2)
+    DES_ANGLE = jp.pi
+    angle_error = self._wrap_angle(angle - DES_ANGLE)
+    swingup_reward = - angle_error - 0.1 * jp.square(angular_velocity)
+
     ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(action))
 
     # Get the observation.
@@ -173,8 +180,8 @@ class Pendulum(mjx_env.MjxEnv):
 
   def _get_obs(self, data: mjx.Data) -> jax.Array:
     """Observe pendulum angle and angular velocity."""
-    angle = data.qpos[1]
-    angular_velocity = data.qvel[1]
+    angle = self._wrap_angle(data.qpos[0])
+    angular_velocity = data.qvel[0]
     
     # Convert angle to cos and sin to avoid angle wrapping issues
     cos_angle = jp.cos(angle)
