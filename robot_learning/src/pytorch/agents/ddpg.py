@@ -173,29 +173,41 @@ class Agent(nn.Module):
 
   @torch.jit.export
   def critic_loss(self, buffer_batch:Dict[str, torch.Tensor]):
-    observation = buffer_batch['obs']
-    observation = self.normalize(observation)
-    action = buffer_batch['action']
-    reward = buffer_batch['reward']
-    next_observations = buffer_batch['next_obs']
-    done = buffer_batch['done']
+    # print('buffer_batch', buffer_batch)
+    sampled_observation = buffer_batch['obs']
+    sampled_privileged_observation = buffer_batch['privileged_obs']
+    sampled_observation = self.normalize(sampled_observation)
+    sampled_privileged_observation = self.normalize_privileged(sampled_privileged_observation)
+    sampled_action = buffer_batch['action']
+    sampled_rewards = buffer_batch['reward']
+    sampled_next_observations = buffer_batch['next_obs']
+    sampled_next_privileged_observation = buffer_batch['next_privileged_obs']
+    sampled_terminated = buffer_batch['done']
+    sampled_truncated = buffer_batch['truncation']
+    # print('sampled_truncated', sampled_truncated)
+    # print('sampled_terminated', sampled_terminated)
 
     with torch.no_grad():
-      next_action = self.action_postprocess(self.policy_t(next_observations))
-      next_value_input = torch.cat((next_observations, next_action), dim=1)
-      next_discounted_return = self.value_t(next_value_input)
+      next_action = self.action_postprocess(self.policy_t(sampled_next_observations))
+      next_value_input = torch.cat((sampled_next_privileged_observation, next_action), dim=1)
+      target_q_values = self.value_t(next_value_input)
       # y_i = r_i + gamma * Q'(s_{i+1}, μ'(s_{i+1}))
-      y = reward + (1 - done) * self.gamma * next_discounted_return
-    state_action_pair = torch.cat([observation, action], dim=1)
-    discounted_return = self.value_b(state_action_pair)
-    v_loss = F.mse_loss(input=discounted_return, target=y)
+      # r_i + gamma * Q'(s_{i+1}, μ'(s_{i+1})) - Q(s_i, a_i)
+      not_done = 1.0 - torch.max(sampled_terminated, sampled_truncated)
+      target_values = sampled_rewards + not_done * self.gamma * target_q_values
+
+    sampled_state_action_pair = torch.cat([sampled_privileged_observation, sampled_action], dim=1)
+    critic_values = self.value_b(sampled_state_action_pair)
+    v_loss = F.mse_loss(input=critic_values, target=target_values)
+
     return v_loss
   
   @torch.jit.export
   def policy_loss(self, buffer_batch: Dict[str, torch.Tensor]):
-    observation = buffer_batch['obs']
-    _, actions_b = self.get_logits_action(observation)
-    state_action_pair = torch.cat([observation, actions_b], dim=1)
+    sampled_observations = buffer_batch['obs']
+    sampled_privileged_observations = buffer_batch['privileged_obs']
+    _, actions_b = self.get_logits_action(sampled_observations)
+    state_action_pair = torch.cat([sampled_privileged_observations, actions_b], dim=1)
     critic_values = self.value_b(state_action_pair)
     p_loss = -critic_values.mean()
     return p_loss
