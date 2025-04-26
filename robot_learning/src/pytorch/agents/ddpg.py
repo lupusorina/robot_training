@@ -211,3 +211,14 @@ class Agent(nn.Module):
     critic_values = self.value_b(state_action_pair)
     p_loss = -critic_values.mean()
     return p_loss
+
+
+if __name__ == '__main__':
+
+  # Test 1: Inference policy_b
+  agent = Agent(policy_layers=[3, 32, 64, 128], value_layers=[3, 32, 64, 128], discounting=0.99, tau=0.001, device='cpu')
+  obs = torch.randn(2, 3)
+  logits, action = agent.policy_b(obs)
+
+  print('logits', logits)
+  print('action', action)
