@@ -8,7 +8,7 @@ from typing import Callable
 
 StepData = collections.namedtuple(
     'StepData',
-    ('obs', 'next_obs', 'privileged_obs', 'action', 'reward', 'done', 'truncation'))
+    ('obs', 'next_obs', 'privileged_obs', 'next_privileged_obs', 'action', 'reward', 'done', 'truncation'))
 
 def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
   """Map a function over each field in StepData."""
