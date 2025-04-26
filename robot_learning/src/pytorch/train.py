@@ -204,7 +204,7 @@ def train(
 
       # Visualize the rollout.
       render_video = True
-      if render_video == True: # and eval_i % 10 == 0:
+      if render_video == True and eval_i % 10 == 0:
         media_files_list = []
         max_num_envs = np.min([num_envs, 10]) # Avoid too many videos to save.
         all_frames = []
