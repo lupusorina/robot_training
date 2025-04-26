@@ -68,6 +68,7 @@ class Agent(nn.Module):
                policy_layers: Sequence[int],
                value_layers: Sequence[int],
                discounting: float = 0.99, # From original paper.
+               action_size: int = 1,
                tau:float = 0.001,         # From original paper.
                device:str = 'cpu'):
     super(Agent, self).__init__()
@@ -75,10 +76,6 @@ class Agent(nn.Module):
     policy = []
     for i, (w1, w2) in enumerate(zip(policy_layers, policy_layers[1:])):
       layer = nn.Linear(w1, w2)
-      if i == len(policy_layers) - 2:
-        # Final layer init: weights in [-3e-3, 3e-3] and same for biases (From original paper).
-        nn.init.uniform_(layer.weight, -3e-3, 3e-3)
-        nn.init.uniform_(layer.bias, -3e-3, 3e-3)
       policy.append(layer)
       policy.append(nn.ReLU())
     policy.pop() # Remove last ReLU, since it's not after final layer.
@@ -96,21 +93,24 @@ class Agent(nn.Module):
     value = []
     for i, (w1, w2) in enumerate(zip(value_layers, value_layers[1:])):
         layer = nn.Linear(w1, w2)
-        if i == len(value_layers) - 2:
-            # Final layer init: weights in [-3e-4, 3e-4] and same for biases (From original paper).
-            nn.init.uniform_(layer.weight, -3e-4, 3e-4)
-            nn.init.uniform_(layer.bias, -3e-4, 3e-4)
         value.append(layer)
         value.append(nn.ReLU())
 
     value.pop()  # remove last ReLU, since it's not after final layer.
-    
+
     # Behaviour value function.
     self.value_b = nn.Sequential(*value)
 
     # Target value function.
     self.value_t = nn.Sequential(*value)
     
+    # # Initialize model params with normal distribution
+    for model in [self.policy_b, self.policy_t, self.value_b, self.value_t]:
+        for layer in model:
+            if isinstance(layer, nn.Linear):
+                nn.init.normal_(layer.weight, mean=0.0, std=0.1)
+                nn.init.normal_(layer.bias, mean=0.0, std=0.1)
+
     # Copy the weights from the behaviour value function to the target value function.
     self.value_t.load_state_dict(self.value_b.state_dict())
 
@@ -124,11 +124,9 @@ class Agent(nn.Module):
     self.running_mean = torch.zeros(policy_layers[0], device=device)
     self.running_variance = torch.zeros(policy_layers[0], device=device)
 
-  @torch.jit.export
-  def normalize(self, observation):
-    variance = self.running_variance / (self.num_steps + 1.0)
-    variance = torch.clip(variance, 1e-6, 1e6)
-    return ((observation - self.running_mean) / variance.sqrt()).clip(-5, 5)
+    self.num_steps_privileged = torch.zeros((), device=device)
+    self.running_mean_privileged = torch.zeros(value_layers[0] - action_size, device=device)
+    self.running_variance_privileged = torch.zeros(value_layers[0] - action_size, device=device)
 
   @torch.jit.export
   def update_normalization(self, observation):
@@ -139,6 +137,28 @@ class Agent(nn.Module):
     input_to_new_mean = observation - self.running_mean
     var_diff = torch.sum(input_to_new_mean * input_to_old_mean, dim=(0, 1))
     self.running_variance = self.running_variance + var_diff
+
+  @torch.jit.export
+  def update_normalization_privileged(self, privileged_observation):
+    self.num_steps_privileged += privileged_observation.shape[0] * privileged_observation.shape[1]
+    input_to_old_mean_privileged = privileged_observation - self.running_mean_privileged
+    mean_diff_privileged = torch.sum(input_to_old_mean_privileged / self.num_steps_privileged, dim=(0, 1))
+    self.running_mean_privileged = self.running_mean_privileged + mean_diff_privileged
+    input_to_new_mean_privileged = privileged_observation - self.running_mean_privileged
+    var_diff_privileged = torch.sum(input_to_new_mean_privileged * input_to_old_mean_privileged, dim=(0, 1))
+    self.running_variance_privileged = self.running_variance_privileged + var_diff_privileged
+
+  @torch.jit.export
+  def normalize(self, observation):
+    variance = self.running_variance / (self.num_steps + 1.0)
+    variance = torch.clip(variance, 1e-6, 1e6)
+    return ((observation - self.running_mean) / variance.sqrt()).clip(-5, 5)
+
+  @torch.jit.export
+  def normalize_privileged(self, privileged_observation):
+    variance = self.running_variance_privileged / (self.num_steps_privileged + 1.0)
+    variance = torch.clip(variance, 1e-6, 1e6)
+    return ((privileged_observation - self.running_mean_privileged) / variance.sqrt()).clip(-5, 5)
 
   @torch.jit.export
   def action_postprocess(self, x):
