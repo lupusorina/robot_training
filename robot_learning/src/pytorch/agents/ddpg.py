@@ -36,7 +36,9 @@ class ReplayBuffer:
             # Trim buffer if it exceeds max size
             if self.td.obs.shape[0] > self.max_size:
                 def trim_buffer(data):
-                    return data[-self.max_size:]
+                    # Generate random indices to keep
+                    indices = torch.randperm(data.shape[0])[:self.max_size]
+                    return data[indices]
                 self.td = sd_map(trim_buffer, self.td)
 
     def sample(self, batch_size) -> StepData:
