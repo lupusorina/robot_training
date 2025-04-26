@@ -53,7 +53,7 @@ def warm_up(env, warm_up_steps, memory, num_envs, action_size):
         } # For video generation.
 
     # Run environment steps.
-    for step in range(warm_up_steps):
+    for _ in range(warm_up_steps):
 
         # Take random actions.
         action = torch.randn((num_envs, action_size), device=env.device)
@@ -69,6 +69,7 @@ def warm_up(env, warm_up_steps, memory, num_envs, action_size):
             obs=obs,                                    # (num_envs, obs_dim)
             privileged_obs=privileged_obs,              # (num_envs, privileged_obs_dim)
             next_obs=next_obs,                          # (num_envs, obs_dim)
+            next_privileged_obs=next_privileged_obs,    # (num_envs, privileged_obs_dim)
             action=action,                              # (num_envs, action_dim)
             reward=reward.unsqueeze(-1),                # (num_envs, 1)
             done=done.unsqueeze(-1),                    # (num_envs, 1)
@@ -92,7 +93,6 @@ def warm_up(env, warm_up_steps, memory, num_envs, action_size):
             warmup_rollout_envs[f'rollout_env_{i}'].append({
                 'qpos': info['qpos'][i].cpu().numpy(),
                 'qvel': info['qvel'][i].cpu().numpy(),
-                'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
             })
 
     # Add warm-up data to memory
@@ -102,10 +102,8 @@ def warm_up(env, warm_up_steps, memory, num_envs, action_size):
     return warmup_rollout_envs
 
 
-def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: int):
+def eval_unroll(agent: Agent, envs: gym.Env, length: int, num_envs: int):
   """Return number of episodes and average reward for a single unroll."""
-  print('In eval unroll')
-  print('num_envs', num_envs)
   output_reset = envs.reset()
   obs = output_reset['state']
 
@@ -128,24 +126,30 @@ def eval_unroll(idx: int, agent: Agent, envs: gym.Env, length: int, num_envs: in
       rollout_envs[f'rollout_env_{i}'].append({
         'qpos': info['qpos'][i].cpu().numpy(),
         'qvel': info['qvel'][i].cpu().numpy(),
-        'xfrc_applied': info['xfrc_applied'][i].cpu().numpy()
       })
     obs = next_obs.clone()
 
   return episodes, episode_reward / episodes, rollout_envs
 
 
-def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, noise: OUNoise, obs: torch.Tensor, privileged_obs: torch.Tensor):
+def train_unroll(agent: Agent,
+                 env: gym.Env,
+                 num_collected_steps: int,
+                 noise: OUNoise,
+                 num_timesteps: int,
+                 num_envs: int,
+                 obs,
+                 privileged_obs):
     """Return step data over multple unrolls."""
-    
+
     transitions_td = None
 
     # Run environment steps
-    for _ in range(unroll_length):
+    for _ in range(num_collected_steps):
         with torch.no_grad():
             _, action = agent.get_logits_action(obs)
             # Convert noise sample to tensor and move to correct device
-            noise_sample = torch.from_numpy(noise.sample()).to(agent.device)
+            noise_sample = torch.stack([torch.from_numpy(noise.sample()).to(agent.device) for _ in range(num_envs)])
             action = action + noise_sample
             next_obs_dict, reward, done, _, info = env.step(action)
 
@@ -161,6 +165,7 @@ def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, noise: OUNoise,
             obs=obs,
             privileged_obs=privileged_obs,
             next_obs=next_obs,
+            next_privileged_obs=next_privileged_obs,
             action=action,
             reward=reward.unsqueeze(-1),
             done=done.unsqueeze(-1),
@@ -168,6 +173,8 @@ def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, noise: OUNoise,
         )
         obs = next_obs.clone()
         privileged_obs = next_privileged_obs.clone()
+        
+        num_timesteps += num_envs
         
         # Add to buffer.
         if transitions_td is None:
@@ -178,25 +185,25 @@ def train_unroll(agent: Agent, env: gym.Env, unroll_length: int, noise: OUNoise,
                 return torch.cat([old, new], dim=0)
             transitions_td = sd_map(concat_buffers, transitions_td, step_td)
 
-    return obs, privileged_obs, transitions_td
+    return obs, privileged_obs, num_timesteps, transitions_td
 
 
 def train(
-    env_name: str = 'ant',
+    env_name: str = 'pendulum',
     num_envs: int = 100,
-    episode_length: int = 1000,
-    nb_episodes: int = 10,
+    episode_length: int = 200,
     device: str = 'cuda',
-    num_timesteps: int = 150_000_000,
-    warm_up_steps: int = 200,
-    minibatch_size: int = 1024,                  # From original paper. 
+    total_timesteps: int = 15_000_000,
+    warm_up_steps: int = 80,
+    batch_size: int = 1024,
     discounting: float = .99,                   # From original paper.
     action_repeat: int = 1,
-    tau: float = 0.001,                         # From original paper.
-    learning_rate_actor: float = 1e-4,          # From original paper.
-    learning_rate_critic: float = 1e-3,         # From original paper.
-    max_memory: int = 2e6,                     # From original paper.
-    gradient_steps: int = 5,
+    tau: float = 0.005,                         # From SKRL
+    learning_rate_actor: float = 5e-4,          # From original paper.
+    learning_rate_critic: float = 5e-4,         # From original paper.
+    max_memory: int = 1e8,
+    gradient_steps: int = 1,
+    num_collected_steps: int = 100,
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
     """Trains a policy via DDPG."""
@@ -207,6 +214,9 @@ def train(
     elif env_name == 'ant':
         from robot_learning.src.jax.envs.ant import Ant
         env = Ant()
+    elif env_name == 'pendulum':
+        from robot_learning.src.jax.envs.pendulum import Pendulum
+        env = Pendulum()
     else:
         raise ValueError(f'Environment {env_name} not supported')
 
@@ -240,9 +250,10 @@ def train(
 
     # Create the agent.
     policy_layers = [obs_size, 256, 128, action_size]
-    value_layers = [obs_size + action_size, 256, 128, 1]
+    value_layers = [priviliged_state_size + action_size, 256, 128, 1]
         
     agent = Agent(policy_layers, value_layers, discounting=discounting,
+                  action_size=action_size,
                 tau=tau, device=device)
     agent = torch.jit.script(agent.to(device))
 
@@ -259,13 +270,12 @@ def train(
     total_steps = 0
     total_loss = 0
 
-    nb_episodes = num_timesteps // (num_envs * episode_length)
+    # nb_episodes = num_timesteps // (num_envs * episode_length)
     print('Training hyperparameters:')
-    print(f'    nb_episodes: {nb_episodes}')
-    print(f'    num_timesteps: {num_timesteps}')
+    print(f'    total_timesteps: {total_timesteps}')
     print(f'    num_envs: {num_envs}')
     print(f'    episode_length: {episode_length}')
-    print(f'    minibatch_size: {minibatch_size}')
+    print(f'    batch_size: {batch_size}')
     print(f'    gradient_steps: {gradient_steps}')
     print(f'    learning_rate_actor: {learning_rate_actor}')
     print(f'    learning_rate_critic: {learning_rate_critic}')
@@ -274,7 +284,7 @@ def train(
 
     if warm_up_steps:
         warmup_rollout_envs = warm_up(env, warm_up_steps, memory, num_envs, action_size)
-        render_video_warmups = False
+        render_video_warmups = True
         if render_video_warmups:
             print('Rendering warmup video ...')
             utils_np.generate_video(render_fn=render_fn,
@@ -286,104 +296,119 @@ def train(
                                     folder_name=ABS_FOLDER_RESUlTS)
     
     # MAIN LOOP.
-    for episode_i in range(nb_episodes + 1):
-        print(f'episode_i: {episode_i}/{nb_episodes+1}')
-
+    total_v_loss = 0.0
+    total_p_loss = 0.0
+    ou_noise.reset()
+    output_reset = env.reset()
+    obs = output_reset['state']
+    privileged_obs = output_reset['privileged_state']
+    
+    evaluation_frequency = 1000
+    evaluation_steps = 0
+    
+    print('Training ...')
+    pbar = tqdm.tqdm(total=total_timesteps, desc="Training Progress")
+    while total_steps < total_timesteps:
         # Training one episode.
-        print('Training ...')
-
-        total_v_loss = 0
-        total_p_loss = 0
-
         t = time.time()
+        # Collect experience
+        obs, privileged_obs, total_steps, transitions_td = train_unroll(agent,
+                                    env,
+                                    num_collected_steps=num_collected_steps,
+                                    noise=ou_noise,
+                                    num_timesteps=total_steps,
+                                    num_envs=num_envs,
+                                    obs=obs,
+                                    privileged_obs=privileged_obs)
 
-        # Initialize a random process for action exploration.
-        ou_noise.reset()
+        agent.update_normalization(transitions_td.obs)
+        agent.update_normalization_privileged(transitions_td.privileged_obs)
 
-        # Reset the environment.
-        output_reset = env.reset()
+        # Store transition.
+        memory.add_trajectory_data(transitions_td)
+        if memory.current_sz() < batch_size:
+            print('Not enough data in memory to train, skipping episode')
+            continue
 
-        # Receive initial observation.
-        obs = output_reset['state']
-        privileged_obs = output_reset['privileged_state']
+        # Gradient steps with progress bar
+        gradient_pbar = tqdm.tqdm(range(gradient_steps), desc="Gradient Steps", leave=False)
+        for _ in gradient_pbar:
+            # Sample a minibatch of transitions.
+            train_data_batch = memory.sample(batch_size=batch_size)
 
-        # clean gradients before training
-        print('Starting training')
-        for _ in range(episode_length):
-            # Collect experience
-            obs, privileged_obs, transitions_td = train_unroll(agent,
-                                        env,
-                                        unroll_length=1,
-                                        noise=ou_noise,
-                                        obs=obs,
-                                        privileged_obs=privileged_obs)
+            v_loss = agent.critic_loss(train_data_batch._asdict())
+            critic_optimizer.zero_grad()
+            v_loss.backward()
+            critic_optimizer.step()
+            total_v_loss += v_loss.item()
 
-            # Store transition.
-            memory.add_trajectory_data(transitions_td)
+            p_loss = agent.policy_loss(train_data_batch._asdict())
+            actor_optimizer.zero_grad()
+            p_loss.backward()
+            actor_optimizer.step()
+            total_p_loss += p_loss.item()
 
-            for _ in range(gradient_steps):
-                # Sample a minibatch of transitions.
-                train_data_batch = memory.sample(batch_size=minibatch_size)
+            # Update target networks.
+            with torch.no_grad():
+                for params, target_params in zip(agent.value_b.parameters(), agent.value_t.parameters()):
+                    target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
 
-                v_loss = agent.critic_loss(train_data_batch._asdict())
-                critic_optimizer.zero_grad()
-                v_loss.backward()
-                critic_optimizer.step()
-                total_v_loss += v_loss.detach()
-
-                p_loss = agent.policy_loss(train_data_batch._asdict())
-                actor_optimizer.zero_grad()
-                p_loss.backward()
-                actor_optimizer.step()
-                total_p_loss += p_loss.detach()
-
-                # Soft update target networks
-                with torch.no_grad():
-                    for params, target_params in zip(agent.value_b.parameters(), agent.value_t.parameters()):
-                        target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
-
-                    for params, target_params in zip(agent.policy_b.parameters(), agent.policy_t.parameters()):
-                        target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
+                for params, target_params in zip(agent.policy_b.parameters(), agent.policy_t.parameters()):
+                    target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
 
         duration = time.time() - t
-        total_steps += num_envs * episode_length  # Each episode processes num_envs * episode_length steps.
         denom = episode_length * gradient_steps  # We do gradient_steps updates per episode.
         if denom > 0:
             total_loss = (total_v_loss + total_p_loss) / denom
         sps = num_envs * episode_length / duration if duration > 0 else 0
-
-        # Save the model
-        print(f'saving model at {total_steps}')
-        torch.save(agent.policy_b.state_dict(), ABS_FOLDER_RESUlTS + f'/ddpg_model_pytorch_{total_steps}.pth')
         
-        # Run evaluation.
-        if progress_fn:
-            t = time.time()
-            with torch.no_grad():
-                episode_count, episode_reward, rollout_envs = eval_unroll(episode_i, agent, env, episode_length, num_envs)
-            duration = time.time() - t
-            episode_avg_length = num_envs * episode_length / episode_count
-            eval_sps = num_envs * episode_length / duration if duration > 0 else 0
-            progress = {
-                'eval/episode_reward': episode_reward,
-                'eval/completed_episodes': episode_count,
-                'eval/avg_episode_length': episode_avg_length,
-                'speed/sps': sps,
-                'speed/eval_sps': eval_sps,
-                'losses/total_loss': total_loss,
-            }
-            progress_fn(total_steps, progress)
+        # Update main progress bar
+        pbar.update(num_collected_steps * num_envs)
+        pbar.set_postfix({
+            'total_steps': total_steps,
+            'sps': f'{sps:.2f}',
+            'total_loss': f'{total_loss:.4f}',
+            'v_loss': f'{total_v_loss:.4f}',
+            'p_loss': f'{total_p_loss:.4f}'
+        })
 
-            # Visualize the rollout.
-            render_video = False
-            if render_video:
-                print('Rendering eval video ...')
-                utils_np.generate_video(render_fn=render_fn,
-                                        rollout_envs=rollout_envs,
-                                        num_envs=num_envs,
-                                        ctrl_dt=ctrl_dt,
-                                        eval_i=episode_i,
-                                        folder_name=ABS_FOLDER_RESUlTS)
+        # Run evaluation.
+        if total_steps % evaluation_frequency == 0:
+            evaluation_steps += 1
+            if progress_fn:
+                t = time.time()
+                with torch.no_grad():
+                    episode_count, episode_reward, rollout_envs = eval_unroll(agent, env, episode_length, num_envs)
+                duration = time.time() - t
+                episode_avg_length = num_envs * episode_length / episode_count
+                eval_sps = num_envs * episode_length / duration if duration > 0 else 0
+                progress = {
+                    'eval/episode_reward': episode_reward,
+                    'eval/completed_episodes': episode_count,
+                    'eval/avg_episode_length': episode_avg_length,
+                    'speed/sps': sps,
+                    'speed/eval_sps': eval_sps,
+                    'losses/total_loss': total_loss,
+                    'losses/v_loss': total_v_loss,
+                    'losses/p_loss': total_p_loss,
+                }
+                progress_fn(total_steps, progress)
+
+                # Visualize the rollout.
+                render_video = True
+                if render_video == True:
+                    print('Rendering eval video ...')
+                    utils_np.generate_video(render_fn=render_fn,
+                                            rollout_envs=rollout_envs,
+                                            num_envs=num_envs,
+                                            ctrl_dt=ctrl_dt,
+                                            eval_i=evaluation_steps,
+                                            folder_name=ABS_FOLDER_RESUlTS)
+
+                # Save the model.
+                print(f'Saving model at {total_steps}')
+                torch.save(agent.policy_b.state_dict(), ABS_FOLDER_RESUlTS + f'/ddpg_model_pytorch_{total_steps}.pth')
+
 
 def progress(num_steps, metrics):
     print(f'steps: {num_steps}, \
@@ -393,13 +418,23 @@ def progress(num_steps, metrics):
     times.append(datetime.now())
     xdata.append(num_steps)
     ydata.append(metrics['eval/episode_reward'].cpu().numpy())
+    loss_v_data.append(metrics['losses/v_loss'])
+    loss_p_data.append(metrics['losses/p_loss'])
     eval_sps.append(metrics['speed/eval_sps'])
     train_sps.append(metrics['speed/sps'])
-    clear_output(wait=True)
-    plt.xlabel('# environment steps')
-    plt.ylabel('reward per episode')
-    plt.plot(xdata, ydata)
+    
+    fig, ax = plt.subplots()
+    ax.set_xlabel('# environment steps')
+    ax.set_ylabel('reward per episode')
+    ax.plot(xdata, ydata)
     plt.savefig(ABS_FOLDER_RESUlTS + '/ddpg_training.png')
+    
+    _, axs = plt.subplots(2, 1)
+    axs[0].plot(xdata, loss_v_data, label='critic loss')
+    axs[1].plot(xdata, loss_p_data, label='actor loss')
+    axs[0].legend()
+    axs[1].legend()
+    plt.savefig(ABS_FOLDER_RESUlTS + '/ddpg_training_losses.png')
 
     # save to pandas df
     df = pd.DataFrame({'x': xdata, 'y': ydata, 'eval_sps': eval_sps, 'train_sps': train_sps})
@@ -412,6 +447,8 @@ if __name__ == '__main__':
   print('Start training')
   xdata = []
   ydata = []
+  loss_v_data = []
+  loss_p_data = []
   eval_sps = []
   train_sps = []
   times = [datetime.now()]
