@@ -29,14 +29,13 @@ ROOT_BODY = robot_config.ROOT_BODY
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
-      ctrl_dt=0.02,
-      sim_dt=0.001,
+      ctrl_dt=0.05,
+      sim_dt=0.01,
       exclude_current_positions_from_observation=True,
       reward_config=config_dict.create(
         ctrl_cost_weight=0.001,
         max_speed=8.0,
-        max_torque=2.0,
-        reset_noise_scale_pos=0.4,
+        reset_noise_scale_pos=1.5,
         reset_noise_scale_vel=1.0,
       ),
   )
@@ -63,24 +62,28 @@ class Pendulum(mjx_env.MjxEnv):
 
     self._ctrl_cost_weight = config.reward_config.ctrl_cost_weight
     self._max_speed = config.reward_config.max_speed
-    self._max_torque = config.reward_config.max_torque
     self._reset_noise_scale_pos = config.reward_config.reset_noise_scale_pos
     self._reset_noise_scale_vel = config.reward_config.reset_noise_scale_vel
     self._exclude_current_positions_from_observation = config.exclude_current_positions_from_observation
 
     # Create the mjx model.
     self._mjx_model = mjx.put_model(self._mj_model)
-    
+
     # Initialize the action space.
     self.nb_joints = self.mj_model.njnt # First joint is freejoint.
     print(f"Number of joints: {self.nb_joints}")
-    
+
+    # Nq and nv size.
+    self.nq = self.mjx_model.nq
+    self.nv = self.mjx_model.nv
+    print(f"Nq: {self.nq}, Nv: {self.nv}")
+
     # Control action names.
     self.name_actuators = []
     for i in range(0, self.mj_model.nu):
         self.name_actuators.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i))
     print("Name of actuators:", self.name_actuators)
-    
+
     # Initialize the initial state.
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
 
@@ -119,6 +122,7 @@ class Pendulum(mjx_env.MjxEnv):
         'reward_ctrl': jp.array(0.0, dtype=jp.float32),
         'angle': jp.array(0.0, dtype=jp.float32),
         'angular_velocity': jp.array(0.0, dtype=jp.float32),
+        'angle_error': jp.array(0.0, dtype=jp.float32),
     }
 
     # Initialize the info.
@@ -149,13 +153,12 @@ class Pendulum(mjx_env.MjxEnv):
     state.info["qvel"] = data.qvel
 
     # Get the angle and angular velocity
-    angle = self._wrap_angle(data.qpos[0])
+    angle = data.qpos[0]
     angular_velocity = data.qvel[0]
 
     # Compute the reward (same as classic control pendulum)
     # The reward is -(theta^2 + 0.1*theta_dt^2 + 0.001*action^2)
-    DES_ANGLE = jp.pi
-    angle_error = self._wrap_angle(angle - DES_ANGLE)
+    angle_error = jp.square(self._wrap_angle(angle))
     swingup_reward = - angle_error - 0.1 * jp.square(angular_velocity)
 
     ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(action))
@@ -169,6 +172,7 @@ class Pendulum(mjx_env.MjxEnv):
 
     # Update the metrics
     metrics = {
+        'angle_error': angle_error,
         'reward_swingup': swingup_reward,
         'reward_ctrl': -ctrl_cost,
         'angle': angle,
@@ -180,7 +184,7 @@ class Pendulum(mjx_env.MjxEnv):
 
   def _get_obs(self, data: mjx.Data) -> jax.Array:
     """Observe pendulum angle and angular velocity."""
-    angle = self._wrap_angle(data.qpos[0])
+    angle = data.qpos[0]
     angular_velocity = data.qvel[0]
     
     # Convert angle to cos and sin to avoid angle wrapping issues
@@ -232,17 +236,23 @@ if __name__ == "__main__":
 
   rollout = []
   state = jit_reset(rng)
-
+  print(f"state.obs['state']: {state.obs['state']}")
+  angle = jp.arctan2(state.obs['state'][1], state.obs['state'][0])
+  print(f"angle: {angle}")
   # create a df to store the state.metrics data
   metrics_list = []
   ctrl_list = []
   state_list = []
-  for i in range(1400):
+  for i in range(200):
     print(i)
     time_duration = time.time()
 
+    # print metrics
+    print(f"state.metrics: {state.metrics}")
+
     # Apply a simple sinusoidal control
-    ctrl = jp.array([2.0 * jp.sin(i * 0.1)])
+    # ctrl = jp.array([2.0 * jp.sin(i * 0.1)])
+    ctrl = jp.array([0.0])
     state = jit_step(state, ctrl)
     state_list.append(state.obs["state"])
     metrics_list.append(state.metrics)
