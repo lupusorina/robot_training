@@ -364,19 +364,44 @@ def generate_video(render_fn, rollout_envs, num_envs, ctrl_dt, eval_i, append_to
     media.write_video(f'{folder_name}/joystick_testing_epoch_{eval_i}_{append_to_filename}.mp4', final_frames, fps=fps)
 
 
-class OUNoise:
-    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
-        self.action_dim = action_dim
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.state = np.ones(self.action_dim, dtype=np.float32) * self.mu
+class OrnsteinUhlenbeckActionNoise():
+    """
+    An Ornstein Uhlenbeck action noise, this is designed to approximate Brownian motion with friction.
 
-    def reset(self):
-        self.state = np.ones(self.action_dim, dtype=np.float32) * self.mu
+    Based on http://math.stackexchange.com/questions/1287634/implementing-ornstein-uhlenbeck-in-matlab
+    """
 
-    def sample(self):
-        dx = self.theta * (self.mu - self.state)
-        dx += self.sigma * np.random.randn(self.action_dim).astype(np.float32)
-        self.state += dx
-        return self.state
+    def __init__(
+        self,
+        mean: np.ndarray,
+        sigma: np.ndarray,
+        theta: float = 0.15,
+        dt: float = 1e-2,
+        initial_noise: Optional[np.ndarray] = None,
+    ) -> None:
+        self._theta = theta
+        self._mu = mean
+        self._sigma = sigma
+        self._dt = dt
+        self.initial_noise = initial_noise
+        self.noise_prev = np.zeros_like(self._mu)
+        self.reset()
+        super().__init__()
+
+    def __call__(self) -> np.ndarray:
+        noise = (
+            self.noise_prev
+            + self._theta * (self._mu - self.noise_prev) * self._dt
+            + self._sigma * np.sqrt(self._dt) * np.random.normal(size=self._mu.shape)
+        )
+        self.noise_prev = noise
+        return noise
+
+    def reset(self) -> None:
+        """
+        reset the Ornstein Uhlenbeck noise, to the initial position
+        """
+        self.noise_prev = self.initial_noise if self.initial_noise is not None else np.zeros_like(self._mu)
+
+    def __repr__(self) -> str:
+        return f"OrnsteinUhlenbeckActionNoise(mu={self._mu}, sigma={self._sigma})"
