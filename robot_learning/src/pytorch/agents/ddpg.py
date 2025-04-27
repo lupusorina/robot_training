@@ -7,8 +7,8 @@ import collections
 from typing import Callable
 
 StepData = collections.namedtuple(
-    'StepData',
-    ('obs', 'next_obs', 'privileged_obs', 'next_privileged_obs', 'action', 'reward', 'done', 'truncation'))
+  'StepData',
+  ('obs', 'next_obs', 'privileged_obs', 'next_privileged_obs', 'action', 'reward', 'done', 'truncation'))
 
 def sd_map(f: Callable[..., torch.Tensor], *sds) -> StepData:
   """Map a function over each field in StepData."""
@@ -52,7 +52,7 @@ class ReplayBuffer:
             return data[indices]
 
         return sd_map(sample_data, self.td)
-    
+
     def current_sz(self):
         """Return current size of the buffer."""
         if self.td is None:
@@ -62,6 +62,71 @@ class ReplayBuffer:
         assert all(s == sizes[0] for s in sizes), "Buffer components have different sizes"
         return sizes[0]
 
+class Policy(nn.Module):
+  def __init__(self, input_dim, output_dim, hidden_layers=[400, 300], device='cpu'):
+    super().__init__()
+    self.input_dim = input_dim
+    self.output_dim = output_dim
+
+    # Create layers dynamically based on hidden_layers list
+    layers = []
+    prev_dim = input_dim
+    for hidden_dim in hidden_layers:
+        layers.extend([
+            nn.Linear(prev_dim, hidden_dim),
+            # nn.LayerNorm(hidden_dim),
+            nn.ReLU()
+        ])
+        prev_dim = hidden_dim
+
+    # Add final action layer
+    layers.append(nn.Linear(prev_dim, output_dim))
+
+    # Create sequential model
+    self.network = nn.Sequential(*layers)
+    self.to(device)
+
+  def forward(self, inputs):
+    return torch.tanh(self.network(inputs))
+
+class Value(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_layers=[400, 300], device='cpu'):
+      super().__init__()
+      self.input_dim = input_dim
+      self.output_dim = output_dim
+
+      # Create layers dynamically based on hidden_layers list
+      layers = []
+      prev_dim = input_dim
+      for hidden_dim in hidden_layers:
+          layers.extend([
+              nn.Linear(prev_dim, hidden_dim),
+              # nn.LayerNorm(hidden_dim),
+              nn.ReLU()
+          ])
+          prev_dim = hidden_dim
+
+      # Add final value layer
+      layers.append(nn.Linear(prev_dim, output_dim))
+
+      # Create sequential model
+      self.network = nn.Sequential(*layers)
+      self.to(device)
+
+    def forward(self, inputs):
+      return self.network(inputs)
+
+def init_model_weights(model:nn.Module, low=0.0, high=0.01, seed=42):
+  if seed is not None:
+      torch.manual_seed(seed)
+  for name, param in model.named_parameters():
+      if param.requires_grad:
+          if "weight" in name:
+              nn.init.uniform_(param, a=low, b=high)
+          elif "bias" in name:
+              nn.init.constant_(param, val=low)
+  return model
+
 class Agent(nn.Module):
 
   def __init__(self,
@@ -70,66 +135,50 @@ class Agent(nn.Module):
                discounting: float = 0.99, # From original paper.
                action_size: int = 1,
                tau:float = 0.001,         # From original paper.
-               device:str = 'cpu'):
+               device:str = 'cpu',
+               seed:int = 42):
     super(Agent, self).__init__()
+
+    # Extract input/output dimensions and hidden layers
+    policy_input_dim = policy_layers[0]
+    policy_output_dim = policy_layers[-1]
+    policy_hidden_layers = policy_layers[1:-1]
     
-    policy = []
-    for i, (w1, w2) in enumerate(zip(policy_layers, policy_layers[1:])):
-      layer = nn.Linear(w1, w2)
-      policy.append(layer)
-      policy.append(nn.ReLU())
-    policy.pop() # Remove last ReLU, since it's not after final layer.
-
-    # Behaviour policy.
-    self.policy_b = nn.Sequential(*policy)
-
-    # Target policy.
-    self.policy_t = nn.Sequential(*policy)
+    value_input_dim = value_layers[0]
+    value_output_dim = value_layers[-1]
+    value_hidden_layers = value_layers[1:-1]
     
-    # Copy the weights from the behaviour policy to the target policy.
-    self.policy_t.load_state_dict(self.policy_b.state_dict())
-
-    # Value function. # TODO: Add this sentence from original paper: "Actions were not included until the 2nd hidden layer of Q. "
-    value = []
-    for i, (w1, w2) in enumerate(zip(value_layers, value_layers[1:])):
-        layer = nn.Linear(w1, w2)
-        value.append(layer)
-        value.append(nn.ReLU())
-
-    value.pop()  # remove last ReLU, since it's not after final layer.
-
-    # Behaviour value function.
-    self.value_b = nn.Sequential(*value)
-
-    # Target value function.
-    self.value_t = nn.Sequential(*value)
+    # Create policy networks
+    self.policy_b = Policy(policy_input_dim, policy_output_dim, policy_hidden_layers, device)
+    self.policy_t = Policy(policy_input_dim, policy_output_dim, policy_hidden_layers, device)
     
-    # # Initialize model params with normal distribution
-    for model in [self.policy_b, self.policy_t, self.value_b, self.value_t]:
-        for layer in model:
-            if isinstance(layer, nn.Linear):
-                nn.init.normal_(layer.weight, mean=0.0, std=0.1)
-                nn.init.normal_(layer.bias, mean=0.0, std=0.1)
+    # Initialize target networks with behavior networks
+    self.policy_t = soft_update(self.policy_t, self.policy_b, 1.0)  # tau=1.0 for complete copy
 
-    # Copy the weights from the behaviour value function to the target value function.
-    self.value_t.load_state_dict(self.value_b.state_dict())
+    # Create value networks
+    self.value_b = Value(value_input_dim, value_output_dim, value_hidden_layers, device)
+    self.value_t = Value(value_input_dim, value_output_dim, value_hidden_layers, device)
+
+    # Initialize target networks with behavior networks
+    self.value_t = soft_update(self.value_t, self.value_b, 1.0)  # tau=1.0 for complete copy
 
     # Hyperparameters.
     self.gamma = discounting
     self.tau = tau
-
     self.device = device
 
+    # Normalization.
     self.num_steps = torch.zeros((), device=device)
-    self.running_mean = torch.zeros(policy_layers[0], device=device)
-    self.running_variance = torch.zeros(policy_layers[0], device=device)
+    self.running_mean = torch.zeros(policy_input_dim, device=device)
+    self.running_variance = torch.zeros(policy_input_dim, device=device)
 
     self.num_steps_privileged = torch.zeros((), device=device)
-    self.running_mean_privileged = torch.zeros(value_layers[0] - action_size, device=device)
-    self.running_variance_privileged = torch.zeros(value_layers[0] - action_size, device=device)
+    self.running_mean_privileged = torch.zeros(value_input_dim - action_size, device=device)
+    self.running_variance_privileged = torch.zeros(value_input_dim - action_size, device=device)
 
   @torch.jit.export
   def update_normalization(self, observation):
+    # TODO: make this not duplicated
     self.num_steps += observation.shape[0] * observation.shape[1]
     input_to_old_mean = observation - self.running_mean
     mean_diff = torch.sum(input_to_old_mean / self.num_steps, dim=(0, 1))
@@ -173,7 +222,6 @@ class Agent(nn.Module):
 
   @torch.jit.export
   def critic_loss(self, buffer_batch:Dict[str, torch.Tensor]):
-    # print('buffer_batch', buffer_batch)
     sampled_observation = buffer_batch['obs']
     sampled_privileged_observation = buffer_batch['privileged_obs']
     sampled_observation = self.normalize(sampled_observation)
@@ -184,28 +232,29 @@ class Agent(nn.Module):
     sampled_next_privileged_observation = buffer_batch['next_privileged_obs']
     sampled_terminated = buffer_batch['done']
     sampled_truncated = buffer_batch['truncation']
-    # print('sampled_truncated', sampled_truncated)
-    # print('sampled_terminated', sampled_terminated)
 
     with torch.no_grad():
       next_action = self.action_postprocess(self.policy_t(sampled_next_observations))
       next_value_input = torch.cat((sampled_next_privileged_observation, next_action), dim=1)
       target_q_values = self.value_t(next_value_input)
+      # print('target_q_values', target_q_values.T)
       # y_i = r_i + gamma * Q'(s_{i+1}, μ'(s_{i+1}))
       # r_i + gamma * Q'(s_{i+1}, μ'(s_{i+1})) - Q(s_i, a_i)
-      not_done = 1.0 - torch.max(sampled_terminated, sampled_truncated)
-      target_values = sampled_rewards + not_done * self.gamma * target_q_values
+      target_values = sampled_rewards + (1 - sampled_terminated) * self.gamma * target_q_values
+      # print('sampled_rewards', sampled_rewards.T)
 
     sampled_state_action_pair = torch.cat([sampled_privileged_observation, sampled_action], dim=1)
     critic_values = self.value_b(sampled_state_action_pair)
     v_loss = F.mse_loss(input=critic_values, target=target_values)
 
     return v_loss
-  
+
   @torch.jit.export
   def policy_loss(self, buffer_batch: Dict[str, torch.Tensor]):
     sampled_observations = buffer_batch['obs']
+    sampled_observations = self.normalize(sampled_observations)
     sampled_privileged_observations = buffer_batch['privileged_obs']
+    sampled_privileged_observations = self.normalize_privileged(sampled_privileged_observations)
     _, actions_b = self.get_logits_action(sampled_observations)
     state_action_pair = torch.cat([sampled_privileged_observations, actions_b], dim=1)
     critic_values = self.value_b(state_action_pair)
@@ -213,12 +262,27 @@ class Agent(nn.Module):
     return p_loss
 
 
+def soft_update(target_network, behavior_network, tau):
+  """Update target network parameters with behavior network parameters using soft update."""
+  with torch.no_grad():
+    for target_param, behavior_param in zip(target_network.network.parameters(), behavior_network.network.parameters()):
+      target_param.data.copy_(tau * behavior_param.data + (1.0 - tau) * target_param.data)
+  return target_network
+
 if __name__ == '__main__':
 
   # Test 1: Inference policy_b
-  agent = Agent(policy_layers=[3, 32, 64, 128], value_layers=[3, 32, 64, 128], discounting=0.99, tau=0.001, device='cpu')
-  obs = torch.randn(2, 3)
-  logits, action = agent.policy_b(obs)
+  agent = Agent(policy_layers=[3, 32, 64, 128, 1], value_layers=[4, 32, 64, 128, 1], discounting=0.99, tau=0.001, device='cpu')
+  B = 100
+  obs = torch.randn((B, 3))
+  print('obs', obs.shape)
+  action = agent.policy_b(obs)
+  print('action', action.shape)
 
-  print('logits', logits)
-  print('action', action)
+  # Value function
+  sampled_privileged_observations = torch.randn(B, 3)
+  actions_b = torch.randn(B, 1)
+  state_action_pair = torch.cat([sampled_privileged_observations, actions_b], dim=1)
+  print('state_action_pair', state_action_pair.shape)
+  critic_values = agent.value_b(state_action_pair)
+  print('critic_values', critic_values.shape)
