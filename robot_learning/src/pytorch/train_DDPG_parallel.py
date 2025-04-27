@@ -1,6 +1,3 @@
-from IPython.display import clear_output
-
-import collections
 from datetime import datetime
 import os
 import time
@@ -11,7 +8,7 @@ import numpy as np
 import torch
 from torch import optim
 from robot_learning.src.pytorch.agents.ddpg import Agent, ReplayBuffer
-from robot_learning.src.pytorch.agents.ddpg import StepData, sd_map
+from robot_learning.src.pytorch.agents.ddpg import StepData, sd_map, soft_update, init_model_weights
 import gymnasium as gym
 import pandas as pd
 
@@ -21,7 +18,7 @@ from robot_learning.src.pytorch.utils_np import VmapWrapper
 from robot_learning.src.pytorch.utils_np import AutoResetWrapper
 from robot_learning.src.pytorch.utils_np import VectorGymWrapper
 import robot_learning.src.pytorch.utils_np as utils_np
-from robot_learning.src.pytorch.utils_np import OUNoise
+from robot_learning.src.pytorch.utils_np import OrnsteinUhlenbeckActionNoise
 
 import tqdm as tqdm
 
@@ -35,72 +32,6 @@ FOLDER_RESULTS = os.path.join(RESULTS, time_now)
 ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
 FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
-
-
-def warm_up(env, warm_up_steps, memory, num_envs, action_size):
-    """Warm up the replay buffer with random actions."""
-    print(f"Warming up replay buffer with {warm_up_steps} steps...")
-
-    # Initialize empty trajectory data structure
-    warm_up_td = None
-
-    output_reset = env.reset()
-    obs = output_reset['state']
-    privileged_obs = output_reset['privileged_state']
-
-    warmup_rollout_envs = {
-        f'rollout_env_{i}': [] for i in range(np.min([num_envs, 10]))
-        } # For video generation.
-
-    # Run environment steps.
-    for _ in range(warm_up_steps):
-
-        # Take random actions.
-        action = torch.randn((num_envs, action_size), device=env.device)
-        action = torch.clamp(action, -1.0, 1.0)
-
-        # Step environment.
-        next_obs_dict, reward, done, _, info = env.step(action)
-        next_obs = next_obs_dict['state']
-        next_privileged_obs = next_obs_dict['privileged_state']
-
-        # Create trajectory data for this step (step_td -> step trajectory data).
-        step_td = StepData(
-            obs=obs,                                    # (num_envs, obs_dim)
-            privileged_obs=privileged_obs,              # (num_envs, privileged_obs_dim)
-            next_obs=next_obs,                          # (num_envs, obs_dim)
-            next_privileged_obs=next_privileged_obs,    # (num_envs, privileged_obs_dim)
-            action=action,                              # (num_envs, action_dim)
-            reward=reward.unsqueeze(-1),                # (num_envs, 1)
-            done=done.unsqueeze(-1),                    # (num_envs, 1)
-            truncation=info['truncation'].unsqueeze(-1) # (num_envs, 1)
-        )
-
-        obs = next_obs.clone()
-        privileged_obs = next_privileged_obs.clone()
-
-        # Add to warm-up buffer.
-        if warm_up_td is None:
-            warm_up_td = step_td
-        else:
-            # Concatenate along the batch dimension.
-            def concat_buffers(old, new):
-                return torch.cat([old, new], dim=0)
-            warm_up_td = sd_map(concat_buffers, warm_up_td, step_td)
-
-        # Save the state for video generation.
-        for i in range(np.min([num_envs, 10])):
-            warmup_rollout_envs[f'rollout_env_{i}'].append({
-                'qpos': info['qpos'][i].cpu().numpy(),
-                'qvel': info['qvel'][i].cpu().numpy(),
-            })
-
-    # Add warm-up data to memory
-    memory.add_trajectory_data(warm_up_td)
-    print(f"Memory size after warm-up: {memory.current_sz()}")
-    print(f"Warm-up complete. Added {warm_up_steps * num_envs} transitions to replay buffer.")
-    return warmup_rollout_envs
-
 
 def eval_unroll(agent: Agent, envs: gym.Env, length: int, num_envs: int):
   """Return number of episodes and average reward for a single unroll."""
@@ -132,14 +63,15 @@ def eval_unroll(agent: Agent, envs: gym.Env, length: int, num_envs: int):
   return episodes, episode_reward / episodes, rollout_envs
 
 
-def train_unroll(agent: Agent,
+def collect_experience(agent: Agent,
                  env: gym.Env,
                  num_collected_steps: int,
-                 noise: OUNoise,
-                 num_timesteps: int,
+                 noise: OrnsteinUhlenbeckActionNoise,
                  num_envs: int,
                  obs,
-                 privileged_obs):
+                 privileged_obs,
+                 action_size: int,
+                 warm_up: bool = False):
     """Return step data over multple unrolls."""
 
     transitions_td = None
@@ -147,10 +79,19 @@ def train_unroll(agent: Agent,
     # Run environment steps
     for _ in range(num_collected_steps):
         with torch.no_grad():
-            _, action = agent.get_logits_action(obs)
-            # Convert noise sample to tensor and move to correct device
-            noise_sample = torch.stack([torch.from_numpy(noise.sample()).to(agent.device) for _ in range(num_envs)])
-            action = action + noise_sample
+            if warm_up == True:
+                # Sample noise and convert to PyTorch tensor
+                noise_samples = np.stack([noise() for _ in range(num_envs)], axis=0)
+                action = torch.from_numpy(noise_samples).float().to(agent.device)
+                assert action.shape == (num_envs, action_size)
+            else:
+                _, action = agent.get_logits_action(obs)
+                # Sample noise and convert to PyTorch tensor
+                noise_samples = np.stack([noise() for _ in range(num_envs)], axis=0)
+                noise_sample = torch.from_numpy(noise_samples).float().to(agent.device)
+                assert noise_sample.shape == (num_envs, action_size)
+                action = action + noise_sample # (num_envs, action_size)
+            action = torch.clamp(action, -1.0, 1.0)
             next_obs_dict, reward, done, _, info = env.step(action)
 
             # Ensure all tensors are on the same device
@@ -174,8 +115,6 @@ def train_unroll(agent: Agent,
         obs = next_obs.clone()
         privileged_obs = next_privileged_obs.clone()
         
-        num_timesteps += num_envs
-        
         # Add to buffer.
         if transitions_td is None:
             transitions_td = step_td
@@ -185,28 +124,33 @@ def train_unroll(agent: Agent,
                 return torch.cat([old, new], dim=0)
             transitions_td = sd_map(concat_buffers, transitions_td, step_td)
 
-    return obs, privileged_obs, num_timesteps, transitions_td
+    return obs, privileged_obs, transitions_td
 
 
 def train(
-    env_name: str = 'pendulum',
+    env_name: str = 'biped',
     num_envs: int = 100,
-    episode_length: int = 200,
+    episode_length: int = 1000,
+    seed: int = 0,
     device: str = 'cuda',
-    total_timesteps: int = 15_000_000,
-    warm_up_steps: int = 80,
-    batch_size: int = 1024,
-    discounting: float = .99,                   # From original paper.
+    total_timesteps: int = 10_150_000,
+    warm_up_steps: int = 100,
+    batch_size: int = 256,
+    discounting: float = .97,                   # From original paper.
     action_repeat: int = 1,
     tau: float = 0.005,                         # From SKRL
     learning_rate_actor: float = 5e-4,          # From original paper.
     learning_rate_critic: float = 5e-4,         # From original paper.
     max_memory: int = 1e8,
     gradient_steps: int = 1,
-    num_collected_steps: int = 100,
+    num_collected_steps: int = 1,
     progress_fn: Optional[Callable[[int, Dict[str, Any]], None]] = None,
 ):
     """Trains a policy via DDPG."""
+    
+    # Set seeds.
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
     if env_name == 'biped':
         from robot_learning.src.jax.envs.biped import Biped
@@ -249,22 +193,27 @@ def train(
     print('Device: ', device)
 
     # Create the agent.
-    policy_layers = [obs_size, 256, 128, action_size]
-    value_layers = [priviliged_state_size + action_size, 256, 128, 1]
-        
+    policy_layers = [obs_size, 400, 300, action_size]
+    value_layers = [priviliged_state_size + action_size, 400, 300, 1]
     agent = Agent(policy_layers, value_layers, discounting=discounting,
                   action_size=action_size,
-                tau=tau, device=device)
+                tau=tau, device=device)    
+    # agent.policy_b = init_model_weights(agent.policy_b, low=0.0, high=0.001, seed=seed)
+    # agent.value_b = init_model_weights(agent.value_b,  low=0.0, high=0.001, seed=seed)
+
     agent = torch.jit.script(agent.to(device))
 
+    # Initialize the memory.
     memory = ReplayBuffer(max_size=max_memory)
-
-    # Exploration noise.
-    ou_noise = OUNoise(action_dim=action_size)
 
     # Optimizers.
     actor_optimizer = optim.Adam(agent.policy_b.parameters(), lr=learning_rate_actor)
     critic_optimizer = optim.Adam(agent.value_b.parameters(), lr=learning_rate_critic)
+
+    # Exploration noise.
+    ou_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(action_size),
+                                                sigma=0.1 * np.ones(action_size),
+                                                theta=0.15)
 
     sps = 0
     total_steps = 0
@@ -281,24 +230,10 @@ def train(
     print(f'    learning_rate_critic: {learning_rate_critic}')
     print(f'    discounting: {discounting}')
     print(f'    tau: {tau}')
-
-    if warm_up_steps:
-        warmup_rollout_envs = warm_up(env, warm_up_steps, memory, num_envs, action_size)
-        render_video_warmups = True
-        if render_video_warmups:
-            print('Rendering warmup video ...')
-            utils_np.generate_video(render_fn=render_fn,
-                                    rollout_envs=warmup_rollout_envs,
-                                    num_envs=num_envs,
-                                    ctrl_dt=ctrl_dt,
-                                    eval_i=0,
-                                    append_to_filename='warmup',
-                                    folder_name=ABS_FOLDER_RESUlTS)
     
     # MAIN LOOP.
     total_v_loss = 0.0
     total_p_loss = 0.0
-    ou_noise.reset()
     output_reset = env.reset()
     obs = output_reset['state']
     privileged_obs = output_reset['privileged_state']
@@ -308,53 +243,70 @@ def train(
     
     print('Training ...')
     pbar = tqdm.tqdm(total=total_timesteps, desc="Training Progress")
-    while total_steps < total_timesteps:
+    nb_episodes = 100
+    counter_episodes = 0
+    for i in range(nb_episodes):
+        print(f'Training episode {i} ...')
+        ou_noise.reset()
+        output_reset = env.reset()
+        obs = output_reset['state']
+        privileged_obs = output_reset['privileged_state']
+
         # Training one episode.
-        t = time.time()
-        # Collect experience
-        obs, privileged_obs, total_steps, transitions_td = train_unroll(agent,
-                                    env,
-                                    num_collected_steps=num_collected_steps,
-                                    noise=ou_noise,
-                                    num_timesteps=total_steps,
-                                    num_envs=num_envs,
-                                    obs=obs,
-                                    privileged_obs=privileged_obs)
+        for tt in range(episode_length):
+            t = time.time()
+            # Collect experience
+            if total_steps < warm_up_steps:
+                warm_up = True
+            else:
+                warm_up = False
+            obs, privileged_obs, transitions_td = collect_experience(agent,
+                                        env,
+                                        num_collected_steps=num_collected_steps,
+                                        noise=ou_noise,
+                                        num_envs=num_envs,
+                                        obs=obs,
+                                        privileged_obs=privileged_obs,
+                                        action_size=action_size,
+                                        warm_up=warm_up)
 
-        agent.update_normalization(transitions_td.obs)
-        agent.update_normalization_privileged(transitions_td.privileged_obs)
+            # Update the number of steps.
+            total_steps += transitions_td.obs.shape[0]
 
-        # Store transition.
-        memory.add_trajectory_data(transitions_td)
-        if memory.current_sz() < batch_size:
-            print('Not enough data in memory to train, skipping episode')
-            continue
+            # Store transition.
+            memory.add_trajectory_data(transitions_td)
+            if memory.current_sz() < batch_size:
+                print('Not enough data in memory to train, skipping episode')
+                continue
 
-        # Gradient steps with progress bar
-        gradient_pbar = tqdm.tqdm(range(gradient_steps), desc="Gradient Steps", leave=False)
-        for _ in gradient_pbar:
-            # Sample a minibatch of transitions.
-            train_data_batch = memory.sample(batch_size=batch_size)
+            # Gradient steps with progress bar
+            gradient_pbar = tqdm.tqdm(range(gradient_steps), desc="Gradient Steps", leave=False)
+            for _ in gradient_pbar:
+                # Sample a minibatch of transitions.
+                train_data_batch = memory.sample(batch_size=batch_size)
+                
+                agent.update_normalization(train_data_batch.obs)
+                agent.update_normalization_privileged(train_data_batch.privileged_obs)
 
-            v_loss = agent.critic_loss(train_data_batch._asdict())
-            critic_optimizer.zero_grad()
-            v_loss.backward()
-            critic_optimizer.step()
-            total_v_loss += v_loss.item()
+                v_loss = agent.critic_loss(train_data_batch._asdict())
+                critic_optimizer.zero_grad()
+                v_loss.backward()
+                # Clip critic gradients
+                torch.nn.utils.clip_grad_norm_(agent.value_b.parameters(), max_norm=1.0)
+                critic_optimizer.step()
+                total_v_loss += v_loss.item()
 
-            p_loss = agent.policy_loss(train_data_batch._asdict())
-            actor_optimizer.zero_grad()
-            p_loss.backward()
-            actor_optimizer.step()
-            total_p_loss += p_loss.item()
+                p_loss = agent.policy_loss(train_data_batch._asdict())
+                actor_optimizer.zero_grad()
+                p_loss.backward()
+                # Clip actor gradients
+                torch.nn.utils.clip_grad_norm_(agent.policy_b.parameters(), max_norm=1.0)
+                actor_optimizer.step()
+                total_p_loss += p_loss.item()
 
-            # Update target networks.
-            with torch.no_grad():
-                for params, target_params in zip(agent.value_b.parameters(), agent.value_t.parameters()):
-                    target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
-
-                for params, target_params in zip(agent.policy_b.parameters(), agent.policy_t.parameters()):
-                    target_params.data.copy_(agent.tau * params.data + (1.0 - agent.tau) * target_params.data)
+                # Update target networks.
+                agent.value_t = soft_update(agent.value_t, agent.value_b, tau)
+                agent.policy_t = soft_update(agent.policy_t, agent.policy_b, tau)
 
         duration = time.time() - t
         denom = episode_length * gradient_steps  # We do gradient_steps updates per episode.
@@ -367,7 +319,6 @@ def train(
         pbar.set_postfix({
             'total_steps': total_steps,
             'sps': f'{sps:.2f}',
-            'total_loss': f'{total_loss:.4f}',
             'v_loss': f'{total_v_loss:.4f}',
             'p_loss': f'{total_p_loss:.4f}'
         })
