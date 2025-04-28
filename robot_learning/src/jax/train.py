@@ -1,33 +1,5 @@
 import os
 import subprocess
-
-if subprocess.run('nvidia-smi').returncode:
-  raise RuntimeError(
-      'Cannot communicate with GPU. '
-      'Make sure you are using a GPU Colab runtime. '
-      'Go to the Runtime menu and select Choose runtime type.'
-  )
-
-# Add an ICD config so that glvnd can pick up the Nvidia EGL driver.
-# This is usually installed as part of an Nvidia driver package, but the Colab
-# kernel doesn't install its driver via APT, and as a result the ICD is missing.
-# (https://github.com/NVIDIA/libglvnd/blob/master/src/EGL/icd_enumeration.md)
-NVIDIA_ICD_CONFIG_PATH = '/usr/share/glvnd/egl_vendor.d/10_nvidia.json'
-if not os.path.exists(NVIDIA_ICD_CONFIG_PATH):
-  with open(NVIDIA_ICD_CONFIG_PATH, 'w') as f:
-    f.write("""{
-    "file_format_version" : "1.0.0",
-    "ICD" : {
-        "library_path" : "libEGL_nvidia.so.0"
-    }
-}
-""")
-
-xla_flags = os.environ.get('XLA_FLAGS', '')
-xla_flags += ' --xla_gpu_triton_gemm_any=True'
-os.environ['XLA_FLAGS'] = xla_flags
-# os.environ['JAX_CHECK_TRACER_LEAKS'] = '1'
-
 import numpy as np
 np.set_printoptions(precision=3, suppress=True, linewidth=100)
 
@@ -111,7 +83,6 @@ def progress(num_steps, metrics):
   plt.savefig(f'{ABS_FOLDER_RESUlTS}/reward.pdf')
   plt.savefig(f'{ABS_FOLDER_RESUlTS}/reward.png')
   print("Reward for {} steps: {:.3f}".format(num_steps, y_data[-1]))
-  # display(plt.gcf())
   
 ppo_training_params = dict(ppo_params)
 network_factory = ppo_networks.make_ppo_networks
