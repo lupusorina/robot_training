@@ -47,10 +47,10 @@
 	</equality> -->
 
   <worldbody>
+    <camera name="track" pos="1.805 -2.105 1.0" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971"/>
 
     <body name="base_link" pos="0.0 0.0 1.0">
     <camera name="front" pos="1.210 -0.435 0.32" xyaxes="0.342 0.940 0.000 -0.321 0.117 0.940" mode="trackcom"/>
-    <camera name="track" pos="0.805 -1.105 0.2" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971" mode="trackcom"/>
       <inertial pos="-0.022 0 0.068" quat="1. 0. 0. 0." mass="3.272" diaginertia="0.018 0.030 0.026" />
       <geom name="base_link" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="base_link"/>
       <joint armature="0" damping="0" limited="false" name="root" pos="0 0 0" stiffness="0" type="free"/>
