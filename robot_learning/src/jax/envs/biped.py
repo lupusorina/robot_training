@@ -436,11 +436,13 @@ class Biped(mjx_env.MjxEnv):
         * self._config.noise_config.scales.gyro
     )
 
-    gravity = data.site_xmat[self._imu_site_id].T @ jp.array([0, 0, -1])
+    up_I = jp.array([0, 0, 1])
+    R_B_I = math.quat_to_mat(data.qpos[3:7])
+    up_B = R_B_I.T @ up_I
     info["rng"], noise_rng = jax.random.split(info["rng"])
-    noisy_gravity = (
-        gravity
-        + (2 * jax.random.uniform(noise_rng, shape=gravity.shape) - 1)
+    noisy_up_B = (
+        up_B
+        + (2 * jax.random.uniform(noise_rng, shape=up_B.shape) - 1)
         * self._config.noise_config.level
         * self._config.noise_config.scales.gravity
     )
@@ -479,7 +481,7 @@ class Biped(mjx_env.MjxEnv):
     self._state = jp.hstack([
         noisy_linvel,  # 3
         noisy_gyro,  # 3
-        noisy_gravity,  # 3
+        noisy_up_B,  # 3
         info["command"],  # 3
         noisy_joint_angles - self._default_q_joints,  # 10
         noisy_joint_vel,  # 10
@@ -496,7 +498,7 @@ class Biped(mjx_env.MjxEnv):
         self._state,
         gyro,  # 3
         accelerometer,  # 3
-        gravity,  # 3
+        up_B,  # 3
         linvel,  # 3
         global_angvel,  # 3
         joint_angles - self._default_q_joints,
