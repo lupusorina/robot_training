@@ -345,7 +345,7 @@ class Biped(mjx_env.MjxEnv):
     ])
 
     # Initialize the observation.
-    obs, state_history, privileged_state_history = self._get_obs(data, info, contact)
+    obs = self._get_obs(data, info, contact, None, None)
     
     # Initialize the reward and done.
     reward, done = jp.zeros(2)
@@ -397,7 +397,7 @@ class Biped(mjx_env.MjxEnv):
     p_fz = p_f[..., -1]
     state.info["swing_peak"] = jp.maximum(state.info["swing_peak"], p_fz)
 
-    obs, state_history, privileged_state_history = self._get_obs(data, state.info, contact)
+    obs = self._get_obs(data, state.info, contact, state.obs["state"], state.obs["privileged_state"])
     done = self._get_termination(data)
 
     # Get the rewards.
@@ -437,10 +437,6 @@ class Biped(mjx_env.MjxEnv):
     state.info["qpos"] = data.qpos
     state.info["qvel"] = data.qvel
 
-    # Update the state history buffers
-    self._state_history = state_history
-    self._privileged_state_history = privileged_state_history
-
     done = done.astype(reward.dtype)
     state = state.replace(data=data, obs=obs, reward=reward, done=done)
     return state
@@ -460,7 +456,8 @@ class Biped(mjx_env.MjxEnv):
     )
 
   def _get_obs(
-      self, data: mjx.Data, info: dict[str, Any], contact: jax.Array
+      self, data: mjx.Data, info: dict[str, Any], contact: jax.Array,
+      _state_history_raveled: jax.Array, _privileged_state_history_raveled: jax.Array,
   ) -> mjx_env.Observation:
     gyro = self._get_sensor_data(data, GYRO_SENSOR)
     info["rng"], noise_rng = jax.random.split(info["rng"])
@@ -546,23 +543,25 @@ class Biped(mjx_env.MjxEnv):
     ])
 
     # Initialize history buffers if they don't exist
-    if self._state_history is None:
+    if _state_history_raveled is None:
         single_state_size = current_state.shape[0]
-        self._state_history = jp.zeros((self._config.history_len, single_state_size))
-    if self._privileged_state_history is None:
+        _state_history_raveled = jp.zeros((self._config.history_len, single_state_size)).ravel()
+    if _privileged_state_history_raveled is None:
         single_privileged_state_size = current_privileged_state.shape[0]
-        self._privileged_state_history = jp.zeros((self._config.history_len, single_privileged_state_size))
+        _privileged_state_history_raveled = jp.zeros((self._config.history_len, single_privileged_state_size)).ravel()
 
     # Update history buffers
-    new_state_history = jp.roll(self._state_history, -1, axis=0)
+    _state_history = _state_history_raveled.reshape(self._config.history_len, -1)
+    _privileged_state_history = _privileged_state_history_raveled.reshape(self._config.history_len, -1)
+    new_state_history = jp.roll(_state_history, -1, axis=0)
     new_state_history = new_state_history.at[-1].set(current_state)
-    new_privileged_state_history = jp.roll(self._privileged_state_history, -1, axis=0)
+    new_privileged_state_history = jp.roll(_privileged_state_history, -1, axis=0)
     new_privileged_state_history = new_privileged_state_history.at[-1].set(current_privileged_state)
 
     return {
         "state": new_state_history.ravel(),  # Flatten the history
         "privileged_state": new_privileged_state_history.ravel(),  # Flatten the history
-    }, new_state_history, new_privileged_state_history
+    }
 
   def _get_reward(
       self,
