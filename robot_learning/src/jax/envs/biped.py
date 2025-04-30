@@ -52,7 +52,7 @@ def default_config() -> config_dict.ConfigDict:
       sim_dt=0.001,
       episode_length=1000,
       action_repeat=1,
-      history_len=1,
+      history_len=3,
       soft_joint_pos_limit_factor=0.95,
       noise_config=config_dict.create(
           level=1.0,  # Set to 0.0 to disable noise.
@@ -144,7 +144,6 @@ class Biped(mjx_env.MjxEnv):
     self.action_space = jp.zeros(self.action_size)
     print(f"Number of joints: {self.nb_joints}")
 
-    # Control action names.
     self.name_actuators = []
     for i in range(0, self.mj_model.nu):  # skip root
         self.name_actuators.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i))
@@ -179,19 +178,13 @@ class Biped(mjx_env.MjxEnv):
     self.policy_idx_to_mj_idx = { self.joint_names_to_policy_idx[name]: self.joint_names_to_mj_idx[name] 
                                  for name in self.joint_names_to_policy_idx }
 
-    # Used for logging.
-    self.state_header = ['noisy_vel_x', 'noisy_vel_y', 'noisy_vel_z', # 3 noisy_linvel
-                          'noisy_gyro_x', 'noisy_gyro_y', 'noisy_gyro_z', # 3 noisy_gyro
-                          'noisy_gravity_x', 'noisy_gravity_y', 'noisy_gravity_z', # 3 noisy_gravity
-                          'command_x', 'command_y', 'command_z', # 3 info["command"]
-                          *['res_' + str(self.name_actuators[i]) + '_pos' for i in range(len(self.name_actuators))],
-                          *['res_' + str(self.name_actuators[i]) + '_vel' for i in range(len(self.name_actuators))],
-                          *['res_last_act_' + str(self.name_actuators[i]) for i in range(len(self.name_actuators))],
-                          'phase_1', 'phase_2', 'phase_3', 'phase_4'] # phase TODO: figure out why we have 4 phases
-
-    self.ctrl_header = ['res_' + str(self.name_actuators[i]) for i in range(len(self.name_actuators))]
-
     self._post_init()
+
+    # Initialize state history buffers
+    self._state_history = None
+    self._privileged_state_history = None
+    
+    self.reset(rng=jax.random.PRNGKey(0))
 
   def _post_init(self) -> None:
     # Initialize the initial state.
@@ -352,7 +345,7 @@ class Biped(mjx_env.MjxEnv):
     ])
 
     # Initialize the observation.
-    obs = self._get_obs(data, info, contact)
+    obs, state_history, privileged_state_history = self._get_obs(data, info, contact)
     
     # Initialize the reward and done.
     reward, done = jp.zeros(2)
@@ -404,7 +397,7 @@ class Biped(mjx_env.MjxEnv):
     p_fz = p_f[..., -1]
     state.info["swing_peak"] = jp.maximum(state.info["swing_peak"], p_fz)
 
-    obs = self._get_obs(data, state.info, contact)
+    obs, state_history, privileged_state_history = self._get_obs(data, state.info, contact)
     done = self._get_termination(data)
 
     # Get the rewards.
@@ -443,6 +436,10 @@ class Biped(mjx_env.MjxEnv):
     state.info["xfrc_applied"] = data.xfrc_applied
     state.info["qpos"] = data.qpos
     state.info["qvel"] = data.qvel
+
+    # Update the state history buffers
+    self._state_history = state_history
+    self._privileged_state_history = privileged_state_history
 
     done = done.astype(reward.dtype)
     state = state.replace(data=data, obs=obs, reward=reward, done=done)
@@ -516,14 +513,14 @@ class Biped(mjx_env.MjxEnv):
         * self._config.noise_config.scales.linvel
     )
 
-    self._state = jp.hstack([
+    current_state = jp.hstack([
         noisy_linvel,  # 3
         noisy_gyro,  # 3
         noisy_up_B,  # 3
         info["command"],  # 3
         noisy_joint_angles - self._default_q_joints,  # 10
         noisy_joint_vel,  # 10
-        info["last_act"],  # 10
+        info["last_act"],  # 8
         phase,
     ])
 
@@ -532,8 +529,8 @@ class Biped(mjx_env.MjxEnv):
     feet_vel = data.sensordata[self._foot_linvel_sensor_adr].ravel()
     root_height = data.qpos[2]
 
-    self._privileged_state = jp.hstack([
-        self._state,
+    current_privileged_state = jp.hstack([
+        current_state,
         gyro,  # 3
         accelerometer,  # 3
         up_B,  # 3
@@ -548,10 +545,24 @@ class Biped(mjx_env.MjxEnv):
         info["feet_air_time"],  # 2
     ])
 
+    # Initialize history buffers if they don't exist
+    if self._state_history is None:
+        single_state_size = current_state.shape[0]
+        self._state_history = jp.zeros((self._config.history_len, single_state_size))
+    if self._privileged_state_history is None:
+        single_privileged_state_size = current_privileged_state.shape[0]
+        self._privileged_state_history = jp.zeros((self._config.history_len, single_privileged_state_size))
+
+    # Update history buffers
+    new_state_history = jp.roll(self._state_history, -1, axis=0)
+    new_state_history = new_state_history.at[-1].set(current_state)
+    new_privileged_state_history = jp.roll(self._privileged_state_history, -1, axis=0)
+    new_privileged_state_history = new_privileged_state_history.at[-1].set(current_privileged_state)
+
     return {
-        "state": self._state,
-        "privileged_state": self._privileged_state,
-    }
+        "state": new_state_history.ravel(),  # Flatten the history
+        "privileged_state": new_privileged_state_history.ravel(),  # Flatten the history
+    }, new_state_history, new_privileged_state_history
 
   def _get_reward(
       self,
@@ -765,8 +776,8 @@ class Biped(mjx_env.MjxEnv):
   @property
   def observation_size(self) -> mjx_env.ObservationSize:
     return {
-        "state": (self._state.size, ),
-        "privileged_state": (self._privileged_state.size,),
+        "state": (self._state_history.size,),
+        "privileged_state": (self._privileged_state_history.size,),
     }
   
   # Accessors.
