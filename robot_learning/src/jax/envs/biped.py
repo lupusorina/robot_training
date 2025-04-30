@@ -19,6 +19,9 @@ import robot_learning.src.jax.utils as utils
 from robot_learning.src.jax.utils import geoms_colliding
 import robot_learning.src.jax.mjx_env as mjx_env
 
+import os
+import json
+
 import time
 
 # Constants.
@@ -114,6 +117,7 @@ class Biped(mjx_env.MjxEnv):
   def __init__(
       self,
       xml_path: str = XML_PATH,
+      save_config_folder: str = None,
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
@@ -146,6 +150,34 @@ class Biped(mjx_env.MjxEnv):
         self.name_actuators.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i))
     print(self.name_actuators)
     print('self.mj_model.nu', self.mj_model.nu)
+
+    self.joint_names_to_policy_idx = {
+      "L_YAW": 0,
+      "L_HAA": 1,
+      "L_HFE": 2,
+      "L_KFE": 3,
+      "L_ANKLE" : None,
+      "R_YAW": 4,
+      "R_HAA": 5,
+      "R_HFE": 6,
+      "R_KFE": 7,
+      "R_ANKLE" : None,
+    }
+
+    for name in self.joint_names_to_policy_idx:
+      assert name in self.name_actuators, f"{name} is not in {self.name_actuators}"
+
+    # Save the policy actuator mapping to a config file.
+    if save_config_folder is not None:
+      with open(os.path.join(save_config_folder, 'policy_actuator_mapping.json'), 'w') as f:
+        json.dump({
+          'joint_names_to_policy_idx': self.joint_names_to_policy_idx,
+        }, f)
+
+    self.joint_names_to_mj_idx = { name: int(self.mj_model.joint(name).qposadr[0] - 7) for name in self.name_actuators }
+
+    self.policy_idx_to_mj_idx = { self.joint_names_to_policy_idx[name]: self.joint_names_to_mj_idx[name] 
+                                 for name in self.joint_names_to_policy_idx }
 
     # Used for logging.
     self.state_header = ['noisy_vel_x', 'noisy_vel_y', 'noisy_vel_z', # 3 noisy_linvel
@@ -349,7 +381,13 @@ class Biped(mjx_env.MjxEnv):
     state = state.replace(data=data)
 
     # Step the model.
-    motor_targets = self._default_q_joints + action * self._config.action_scale
+    action_complete = jp.zeros(self.mjx_model.nu)
+    for name, policy_idx in self.joint_names_to_policy_idx.items():
+      if policy_idx is None:
+        continue
+      action_complete = action_complete.at[self.policy_idx_to_mj_idx[policy_idx]].set(action[policy_idx])
+
+    motor_targets = self._default_q_joints + action_complete
     data = mjx_env.step(
       self.mjx_model, state.data, motor_targets, self._n_substeps
     )
@@ -738,7 +776,7 @@ class Biped(mjx_env.MjxEnv):
 
   @property
   def action_size(self) -> int:
-    return self.nb_joints
+    return self.nb_joints - 2
 
   @property
   def mj_model(self) -> mujoco.MjModel:
