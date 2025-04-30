@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from ml_collections import config_dict
 from robot_learning.src.jax.wrapper import wrap_for_brax_training
-
+import jax
 # Folders.
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
@@ -22,8 +22,11 @@ if not os.path.exists(os.path.join(RESULTS, time_now)):
     os.makedirs(os.path.join(RESULTS, time_now))
 FOLDER_RESULTS = os.path.join(RESULTS, time_now)
 ABS_FOLDER_RESUlTS = os.path.abspath(FOLDER_RESULTS)
-FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250318-173452/000151388160')
 print(f"Saving results to {ABS_FOLDER_RESUlTS}")
+
+print("Available devices:", jax.devices())
+
+# FOLDER_RESTORE_CHECKPOINT = os.path.abspath(RESULTS + '/20250429-135159/000035717120')
 
 # Brax PPO config.
 brax_ppo_config = config_dict.create(
@@ -55,8 +58,8 @@ ppo_params = brax_ppo_config
 
 # Environment.
 from robot_learning.src.jax.envs.biped import Biped
-env = Biped()
-eval_env = Biped()
+env = Biped(save_config_folder=ABS_FOLDER_RESUlTS)
+eval_env = Biped(save_config_folder=ABS_FOLDER_RESUlTS)
 
 x_data, y_data, y_dataerr = [], [], []
 times = [datetime.now()]
