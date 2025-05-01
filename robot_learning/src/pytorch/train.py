@@ -108,7 +108,7 @@ def train_unroll(agent: Agent, obs_dict: torch.Tensor, env: gym.Env, num_unrolls
   return td
 
 def train(
-    env_name: str = 'pendulum',
+    env_name: str = 'biped',
     num_envs: int = 8192,
     episode_length: int = 1000,
     device: str = 'cuda',
