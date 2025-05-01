@@ -84,7 +84,7 @@ def default_config() -> config_dict.ConfigDict:
               # Feet related rewards.
               feet_clearance=0.0,
               feet_air_time=2.0,
-              feet_slip=-0.25,
+              feet_slip=-0.10,
               feet_height=0.0,
               feet_phase=1.0,
               # Other rewards.
@@ -173,12 +173,27 @@ class Biped(mjx_env.MjxEnv):
           'joint_names_to_policy_idx': self.joint_names_to_policy_idx,
         }, f)
 
+    # Save the config to a file.
+    with open(os.path.join(save_config_folder, 'config.json'), 'w') as f:
+      config_dict = self._config.to_dict()
+      json.dump(config_dict, f)
+
     self.joint_names_to_mj_idx = { name: int(self.mj_model.joint(name).qposadr[0] - 7) for name in self.name_actuators }
 
     self.policy_idx_to_mj_idx = { self.joint_names_to_policy_idx[name]: self.joint_names_to_mj_idx[name] 
                                  for name in self.joint_names_to_policy_idx }
 
     self._post_init()
+
+    dict_initial_qpos = {}
+    for i in range(self.mj_model.njnt): # First joint is freejoint.
+      name = self.mj_model.joint(i).name
+      if name == 'root':
+        continue
+      dict_initial_qpos[name] = float(self._mj_model.keyframe("home").qpos[self.mj_model.joint(name).qposadr[0]])
+    print('dict_initial_qpos', dict_initial_qpos)
+    with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
+      json.dump(dict_initial_qpos, f)
 
     # Initialize state history buffers
     self._state_history = None
