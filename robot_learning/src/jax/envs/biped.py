@@ -265,15 +265,15 @@ class Biped(mjx_env.MjxEnv):
     self._floor_geom_id = self._mj_model.geom("floor").id
     self._feet_geom_id = np.array([self._mj_model.geom(name).id for name in FEET_GEOMS])
 
-    foot_linvel_sensor_adr = []
+    foot_global_linvel_sensor_adr = []
     for site in FEET_SITES:
       sensor_id = self._mj_model.sensor(f"{site}_global_linvel").id
       sensor_adr = self._mj_model.sensor_adr[sensor_id]
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      foot_linvel_sensor_adr.append(
+      foot_global_linvel_sensor_adr.append(
           list(range(sensor_adr, sensor_adr + sensor_dim))
       )
-    self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
+    self._foot_global_linvel_sensor_adr = jp.array(foot_global_linvel_sensor_adr)
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
     qpos = self._init_q
@@ -541,8 +541,8 @@ class Biped(mjx_env.MjxEnv):
 
     accelerometer = self._get_sensor_data(data, ACCELEROMETER_SENSOR)
     global_angvel = self._get_sensor_data(data, GLOBAL_ANGVEL_SENSOR)
-    feet_vel = data.sensordata[self._foot_linvel_sensor_adr].ravel()
-    root_height = data.qpos[2]
+    feet_vel_I = data.sensordata[self._foot_global_linvel_sensor_adr].ravel()
+    baselink_height_I = data.qpos[2]
 
     current_privileged_state = jp.hstack([
         current_state,
@@ -553,10 +553,10 @@ class Biped(mjx_env.MjxEnv):
         global_angvel,  # 3
         joint_angles - self._default_q_joints,
         joint_vel,
-        root_height,  # 1
+        baselink_height_I,  # 1
         data.actuator_force,  # 10
         contact,  # 2
-        feet_vel,  # 4*3
+        feet_vel_I,  # 4*3
         info["feet_air_time"],  # 2
     ])
 
@@ -716,7 +716,7 @@ class Biped(mjx_env.MjxEnv):
 
   def _cost_feet_clearance(self, data: mjx.Data, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
-    feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+    feet_vel = data.sensordata[self._foot_global_linvel_sensor_adr]
     vel_xy = feet_vel[..., :2]
     vel_norm = jp.sqrt(jp.linalg.norm(vel_xy, axis=-1))
     foot_pos = data.site_xpos[self._feet_site_id]
