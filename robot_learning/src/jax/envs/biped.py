@@ -174,9 +174,10 @@ class Biped(mjx_env.MjxEnv):
         }, f)
 
     # Save the config to a file.
-    with open(os.path.join(save_config_folder, 'config.json'), 'w') as f:
-      config_dict = self._config.to_dict()
-      json.dump(config_dict, f)
+    if save_config_folder is not None:
+      with open(os.path.join(save_config_folder, 'config.json'), 'w') as f:
+        config_dict = self._config.to_dict()
+        json.dump(config_dict, f)
 
     self.joint_names_to_mj_idx = { name: int(self.mj_model.joint(name).qposadr[0] - 7) for name in self.name_actuators }
 
@@ -191,9 +192,11 @@ class Biped(mjx_env.MjxEnv):
       if name == 'root':
         continue
       dict_initial_qpos[name] = float(self._mj_model.keyframe("home").qpos[self.mj_model.joint(name).qposadr[0]])
-    print('dict_initial_qpos', dict_initial_qpos)
-    with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
-      json.dump(dict_initial_qpos, f)
+
+    # Save the initial qpos to a file.
+    if save_config_folder is not None:
+      with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
+        json.dump(dict_initial_qpos, f)
 
     # Initialize state history buffers
     self._state_history = None
