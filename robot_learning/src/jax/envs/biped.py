@@ -709,10 +709,14 @@ class Biped(mjx_env.MjxEnv):
   # Feet related rewards.
   def _cost_feet_slip(self, data: mjx.Data, contact: jax.Array, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
-    lin_vel = self._get_sensor_data(data, LOCAL_LINVEL_SENSOR)
-    body_vel = lin_vel[:2]
-    reward = jp.sum(jp.linalg.norm(body_vel, axis=-1) * contact)
-    return reward
+    # Get feet velocity in inertial frame
+    feet_vel = data.sensordata[self._foot_global_linvel_sensor_adr]
+    feet_vel_xy = feet_vel[..., :2] # Get x,y components of feet velocity in inertial frame
+
+    # Calculate slip cost based on feet velocity when in contact
+    slip_cost = jp.sum(jp.linalg.norm(feet_vel_xy, axis=-1) * contact)
+
+    return slip_cost
 
   def _cost_feet_clearance(self, data: mjx.Data, info: dict[str, Any]) -> jax.Array:
     del info  # Unused.
