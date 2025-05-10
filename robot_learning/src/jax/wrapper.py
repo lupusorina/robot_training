@@ -93,7 +93,6 @@ def wrap_for_brax_training(
   if randomization_fn is None:
     env = brax_training.VmapWrapper(env)  # pytype: disable=wrong-arg-types
   else:
-    print("randomization_fn is not None")
     env = BraxDomainRandomizationVmapWrapper(env, randomization_fn)
   env = brax_training.EpisodeWrapper(env, episode_length, action_repeat)
   env = BraxAutoResetWrapper(env)
