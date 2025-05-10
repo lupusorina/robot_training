@@ -1,25 +1,73 @@
-# Copyright 2025 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+# Modified from mujoco-playground.
 """Domain randomization for the Caltech's biped environment."""
 
 import jax
 from mujoco import mjx
+import argparse
+import json
+import os
+from etils import epath
 
 FLOOR_GEOM_ID = 0
 TORSO_BODY_ID = 1
 TORSO_BODY_NAME = "base_link"
+
+CONFIG_RANDOMIZE = {
+  'randomize_floor_friction': False,
+  'randomize_link_masses': False,
+  'randomize_torso_mass': False,
+  'randomize_qpos0': False,
+  'randomize_body_ipos': False,
+  'randomize_actuator_gainprm': False,
+}
+
+parser = argparse.ArgumentParser(description='Domain randomization configuration')
+parser.add_argument('--randomize_floor_friction', action='store_true',
+                    help='Randomize floor friction')
+parser.add_argument('--no_randomize_floor_friction', action='store_true',
+                    dest='randomize_floor_friction',
+                    help='Disable floor friction randomization')
+parser.add_argument('--randomize_link_masses', action='store_true',
+                    help='Randomize link masses')
+parser.add_argument('--randomize_torso_mass', action='store_true',
+                    help='Randomize torso mass')
+parser.add_argument('--randomize_qpos0', action='store_true',
+                    help='Randomize initial joint positions')
+parser.add_argument('--randomize_body_ipos', action='store_true',
+                    help='Randomize body center of mass offsets')
+parser.add_argument('--randomize_actuator_gainprm', action='store_true',
+                    help='Randomize actuator gain parameters')
+
+args = parser.parse_args()
+
+# Update CONFIG_RANDOMIZE with command line arguments.
+CONFIG_RANDOMIZE.update({
+    'randomize_floor_friction': args.randomize_floor_friction,
+    'randomize_link_masses': args.randomize_link_masses,
+    'randomize_torso_mass': args.randomize_torso_mass,
+    'randomize_qpos0': args.randomize_qpos0,
+    'randomize_body_ipos': args.randomize_body_ipos,
+    'randomize_actuator_gainprm': args.randomize_actuator_gainprm,
+})
+
+# Testing: load the latest weights and test the policy.
+RESULTS_FOLDER_PATH = os.path.abspath('results')
+
+# Sort by date and get the latest folder.
+folders = sorted(os.listdir(RESULTS_FOLDER_PATH))
+latest_folder = folders[-1]
+
+# Save the config to a file.
+config_path = epath.Path(RESULTS_FOLDER_PATH) / latest_folder / 'config_randomize.json'
+
+# Save the current config.
+with open(config_path, 'w') as f:
+    json.dump(CONFIG_RANDOMIZE, f, indent=2)
+
+with open(config_path, 'r') as f:
+    CONFIG_RANDOMIZE = json.load(f)
+
+print(CONFIG_RANDOMIZE)
 
 def domain_randomize(model: mjx.Model, rng: jax.Array):
     @jax.vmap
