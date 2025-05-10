@@ -13,6 +13,23 @@ import numpy as np
 from ml_collections import config_dict
 from robot_learning.src.jax.wrapper import wrap_for_brax_training
 import jax
+from brax.training.agents.ppo import checkpoint as ppo_checkpoint
+
+from robot_learning.src.jax.utils import draw_joystick_command
+import time
+import robot_learning.src.jax.envs.biped as bb
+from etils import epath
+import jax
+from jax import numpy as jp
+import mujoco
+
+from tqdm import tqdm
+
+import mediapy as media
+
+# Set seed
+jax.random.PRNGKey(0)
+
 # Folders.
 RESULTS = 'results'
 if not os.path.exists(RESULTS):
@@ -76,7 +93,7 @@ def progress(num_steps, metrics):
 
   reward_list.append([num_steps, metrics["eval/episode_reward"]])
 
-  fig, ax = plt.subplots()
+  _, ax = plt.subplots()
   ax.set_xlim([0, ppo_params["num_timesteps"] * 1.25])
   ax.set_xlabel("# environment steps")
   ax.set_ylabel("reward per episode")
@@ -98,12 +115,11 @@ if "network_factory" in ppo_params:
 
 from randomize import domain_randomize
 
-# with jax.checking_leaks():
 train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),
     network_factory=network_factory,
     progress_fn=progress,
-    # randomization_fn=domain_randomize,
+    randomization_fn=domain_randomize,
     save_checkpoint_path=ABS_FOLDER_RESUlTS,
     # restore_checkpoint_path=FOLDER_RESTORE_CHECKPOINT
 )
@@ -115,3 +131,117 @@ make_inference_fn, params, metrics = train_fn(
 )
 print(f"time to jit: {times[1] - times[0]}")
 print(f"time to train: {times[-1] - times[1]}")
+
+# Testing: load the latest weights and test the policy.
+RESULTS_FOLDER_PATH = os.path.abspath('results')
+
+# Sort by date and get the latest folder.
+folders = sorted(os.listdir(RESULTS_FOLDER_PATH))
+latest_folder = folders[-1]
+
+# In the latest folder, find the latest folder, ignore the files.
+folders = sorted(os.listdir(epath.Path(RESULTS_FOLDER_PATH) / latest_folder))
+folders = [f for f in folders if os.path.isdir(epath.Path(RESULTS_FOLDER_PATH) / latest_folder / f)]
+
+policy_fn_list = []
+policy_folder_list = []
+
+USE_LATEST_WEIGHTS = True
+if USE_LATEST_WEIGHTS:
+  latest_weights_folder = folders[-1]
+  print(f'Latest weights folder: {latest_weights_folder}')
+  policy_fn = ppo_checkpoint.load_policy(epath.Path(RESULTS_FOLDER_PATH) / latest_folder / latest_weights_folder)
+  policy_fn_list.append(policy_fn)
+  policy_folder_list.append(latest_weights_folder)
+else:
+  for folder in folders:
+    policy_fn = ppo_checkpoint.load_policy(epath.Path(RESULTS_FOLDER_PATH) / latest_folder / folder)
+    policy_fn_list.append(policy_fn)
+    policy_folder_list.append(folder)
+
+env_name = bb.NAME_ROBOT
+print(f'env_name: {env_name}')
+
+for policy_fn, folder in zip(policy_fn_list, policy_folder_list):
+  print(f'{folder}')
+  eval_env = bb.Biped()
+
+  jit_reset = jax.jit(eval_env.reset)
+  jit_step = jax.jit(eval_env.step)
+  jit_policy = jax.jit(policy_fn)
+  step_fn = jax.jit(eval_env.step)
+  rng = jax.random.PRNGKey(1)
+
+  rollout = []
+  modify_scene_fns = []
+
+  x_vel = 0.0  #@param {type: "number"}
+  y_vel = 0.0  #@param {type: "number"}
+  yaw_vel = 0.0  #@param {type: "number"}
+  command = jp.array([x_vel, y_vel, yaw_vel])
+
+  phase_dt = 2 * jp.pi * eval_env.ctrl_dt * 1.5
+  phase = jp.array([0, jp.pi])
+
+  state = jit_reset(rng)
+  state.info["phase_dt"] = phase_dt
+  state.info["phase"] = phase
+
+  # create a df to store the state.metrics data
+  metrics_list = []
+  ctrl_list = []
+  state_list = []
+  for i in tqdm(range(1400)):
+    time_duration = time.time()
+    act_rng, rng = jax.random.split(rng)
+    ctrl, _ = jit_policy(state.obs, act_rng)
+    ctrl_list.append(ctrl)
+    state = jit_step(state, ctrl)
+    state_list.append(state.obs["state"])
+    metrics_list.append(state.metrics)
+    if state.done:
+      break
+    state.info["command"] = command
+    rollout.append(state)
+
+    xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
+    xyz += np.array([0.0, 0.0, 0.0])
+    x_axis = state.data.xmat[eval_env._torso_body_id, 0]
+    yaw = -np.arctan2(x_axis[1], x_axis[0])
+    modify_scene_fns.append(
+        functools.partial(
+            draw_joystick_command,
+            cmd=state.info["command"],
+            xyz=xyz,
+            theta=yaw,
+            scl=np.linalg.norm(state.info["command"]),
+        )
+    )
+    time_diff = time.time() - time_duration
+
+  render_every = 1
+  fps = 1.0 / eval_env.ctrl_dt / render_every
+  print(f"fps: {fps}")
+  traj = rollout[::render_every]
+  mod_fns = modify_scene_fns[::render_every]
+
+  scene_option = mujoco.MjvOption()
+  scene_option.geomgroup[2] = True
+  scene_option.geomgroup[3] = False
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+  scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+  frames = eval_env.render(
+      traj,
+      camera="track",
+      scene_option=scene_option,
+      width=640,
+      height=480,
+      modify_scene_fns=mod_fns,
+  )
+
+  # media.show_video(frames, fps=fps, loop=False)
+  ABS_FOLDER_RESUlTS = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
+  media.write_video(f'{ABS_FOLDER_RESUlTS}/joystick_testing_{folder}_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
+  print('Video saved')
