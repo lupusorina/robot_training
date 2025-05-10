@@ -13,6 +13,7 @@ import mujoco
 from mujoco import mjx
 from mujoco.mjx._src import math
 import numpy as np
+import mujoco.viewer
 
 # Local imports.
 import robot_learning.src.jax.utils as utils
@@ -828,7 +829,7 @@ from robot_learning.src.jax.utils import draw_joystick_command
 import functools
 import mediapy as media
 
-if __name__ == "__main__":
+def test_jax_biped():
 
   eval_env = Biped()
   jit_reset = jax.jit(eval_env.reset)
@@ -908,3 +909,69 @@ if __name__ == "__main__":
   # media.show_video(frames, fps=fps, loop=False)
   media.write_video(f'joystick_testing_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
   print('Video saved')
+
+def test_mujoco_biped():
+  paused = False
+  def key_callback(keycode):
+    if chr(keycode) == ' ':
+      nonlocal paused
+      paused = not paused
+
+  def read_contact_states(model, data):
+    contact_states = {}
+    contact_states['R_FOOT'] = False
+    contact_states['L_FOOT'] = False
+
+    geom1_list = []
+    geom2_list = []
+    for i in range(data.ncon):
+        contact = data.contact[i]
+
+        name_geom1 = mujoco.mj_id2name(
+            model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1)
+        name_geom2 = mujoco.mj_id2name(
+            model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2)
+        geom1_list.append(name_geom1)
+        geom2_list.append(name_geom2)
+
+    if data.ncon != 0:
+        if 'L_FOOT' in geom2_list:
+            first_entry_idx = geom2_list.index('L_FOOT')
+            if geom1_list[first_entry_idx] == 'floor':
+                contact_states['L_FOOT'] = True
+
+        if 'R_FOOT' in geom2_list:
+            first_entry_idx = geom2_list.index('R_FOOT')
+            if geom1_list[first_entry_idx] == 'floor':
+                contact_states['R_FOOT'] = True
+    return contact_states
+
+  mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
+  mj_data = mujoco.MjData(mj_model)
+
+  default_q_joints = jp.array(mj_model.keyframe("home").qpos[7:])
+  mj_data.ctrl = default_q_joints.copy()
+  viewer = mujoco.viewer.launch_passive(mj_model, mj_data, key_callback=key_callback)
+
+  dh = 0.001
+
+  while viewer.is_running():
+    mj_data.ctrl = default_q_joints.copy()
+
+    # Slowly move the height down.
+    mj_model.eq_data[0][2] -= dh
+
+    # Check for feet contact.
+    contact_states = read_contact_states(mj_model, mj_data)
+    if contact_states['L_FOOT'] or contact_states['R_FOOT']:
+      mj_model.eq_active0 = 0 # Let go of the robot.
+      mj_data.eq_active[0] = 0
+      dh = 0.0
+
+    if not paused:
+      mujoco.mj_step(mj_model, mj_data)
+      viewer.sync()
+
+if __name__ == "__main__":
+  # test_jax_biped()
+  test_mujoco_biped()
