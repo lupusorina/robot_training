@@ -4,3 +4,4 @@ brax
 jax[cuda12]
 imageio
 gymnasium
+brax==0.12.3
