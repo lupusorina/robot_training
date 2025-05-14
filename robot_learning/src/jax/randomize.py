@@ -72,84 +72,75 @@ print(CONFIG_RANDOMIZE)
 def domain_randomize(model: mjx.Model, rng: jax.Array):
     @jax.vmap
     def rand_dynamics(rng):
-        # Floor friction: =U(0.4, 1.0).
-        rng, key = jax.random.split(rng)
-        geom_friction = model.geom_friction.at[FLOOR_GEOM_ID, 0].set(
-            jax.random.uniform(key, minval=0.4, maxval=1.0)
-        )
+        model_updates = {}
 
-        # Scale all link masses: *U(0.9, 1.1).
-        rng, key = jax.random.split(rng)
-        dmass = jax.random.uniform(
-            key, shape=(model.nbody,), minval=0.9, maxval=1.1
-        )
-        body_mass = model.body_mass.at[:].set(model.body_mass * dmass)
-
-        # # Add mass to torso: +U(-1.0, 1.0).
-        rng, key = jax.random.split(rng)
-        dmass = jax.random.uniform(key, minval=-1.0, maxval=1.0)
-        body_mass = body_mass.at[TORSO_BODY_ID].set(
-            body_mass[TORSO_BODY_ID] + dmass
-        )
-
-        # Jitter qpos0: +U(-0.1, 0.1).
-        rng, key = jax.random.split(rng)
-        qpos0 = model.qpos0
-        qpos0 = qpos0.at[7:].set(
-            qpos0[7:]
-            + jax.random.uniform(key, shape=(10,), minval=-0.1, maxval=0.1)
-        )
-
-        # Center of mass offset.
-        rng, key = jax.random.split(rng)
-        com_offset = jax.random.uniform(key, shape=(3,), minval=-0.1, maxval=0.1)
-        body_ipos = model.body_ipos
-        body_ipos = body_ipos.at[TORSO_BODY_ID].set(
-            body_ipos[TORSO_BODY_ID] + com_offset
-        )
-
-        # Kp and Kv for the motors.
-        # Initialize actuator gain parameters
-        actuator_gainprm = model.actuator_gainprm
-
-        # Update each actuator's gain parameter
-        for i in range(model.nu):
-            kp_nominal = model.actuator_gainprm[i][0]
+        if CONFIG_RANDOMIZE['randomize_floor_friction']:
+            # Floor friction: =U(0.4, 1.0).
             rng, key = jax.random.split(rng)
-            dkp = jax.random.uniform(key, minval=-0.5, maxval=0.5)
-            actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal + dkp)
+            geom_friction = model.geom_friction.at[FLOOR_GEOM_ID, 0].set(
+                jax.random.uniform(key, minval=0.4, maxval=1.0)
+            )
+            model_updates["geom_friction"] = geom_friction
 
-        return (
-            geom_friction,
-            body_mass,
-            qpos0,
-            body_ipos,
-            actuator_gainprm,
-        )
+        if CONFIG_RANDOMIZE['randomize_link_masses']:
+            # Scale all link masses: *U(0.9, 1.1).
+            rng, key = jax.random.split(rng)
+            dmass = jax.random.uniform(
+                key, shape=(model.nbody,), minval=0.9, maxval=1.1
+            )
+            body_mass = model.body_mass.at[:].set(model.body_mass * dmass)
+            model_updates["body_mass"] = body_mass
 
-    (
-        friction,
-        body_mass,
-        qpos0,
-        body_ipos,
-        actuator_gainprm,
-    ) = rand_dynamics(rng)
+        if CONFIG_RANDOMIZE['randomize_torso_mass']:
+            # Add mass to torso: +U(-1.0, 1.0).
+            rng, key = jax.random.split(rng)
+            dmass = jax.random.uniform(key, minval=-1.0, maxval=1.0)
+            body_mass = model.body_mass.at[TORSO_BODY_ID].set(
+                model.body_mass[TORSO_BODY_ID] + dmass
+            )
+            model_updates["body_mass"] = body_mass
 
+        if CONFIG_RANDOMIZE['randomize_qpos0']:
+            # Jitter qpos0: +U(-0.1, 0.1).
+            rng, key = jax.random.split(rng)
+            qpos0 = model.qpos0
+            qpos0 = qpos0.at[7:].set(
+                qpos0[7:]
+                + jax.random.uniform(key, shape=(10,), minval=-0.1, maxval=0.1)
+            )
+            model_updates["qpos0"] = qpos0
+
+        if CONFIG_RANDOMIZE['randomize_body_ipos']:
+            # Center of mass offset.
+            rng, key = jax.random.split(rng)
+            com_offset = jax.random.uniform(key, shape=(3,), minval=-0.1, maxval=0.1)
+            body_ipos = model.body_ipos
+            body_ipos = body_ipos.at[TORSO_BODY_ID].set(
+                body_ipos[TORSO_BODY_ID] + com_offset
+            )
+            model_updates["body_ipos"] = body_ipos
+
+        if CONFIG_RANDOMIZE['randomize_actuator_gainprm']:
+            # Kp and Kv for the motors.
+            actuator_gainprm = model.actuator_gainprm
+            for i in range(model.nu):
+                kp_nominal = model.actuator_gainprm[i][0]
+                rng, key = jax.random.split(rng)
+                dkp = jax.random.uniform(key, minval=0.9, maxval=1.1)
+                actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal * dkp)
+            model_updates["actuator_gainprm"] = actuator_gainprm
+
+        return model_updates
+
+    model_updates = rand_dynamics(rng)
+
+    # Create in_axes mapping for the enabled randomization features.
     in_axes = jax.tree_util.tree_map(lambda x: None, model)
     in_axes = in_axes.tree_replace({
-        "geom_friction": 0,
-        "body_mass": 0,
-        "qpos0": 0,
-        "body_ipos": 0,
-        "actuator_gainprm": 0,
+        key: 0 for key in model_updates.keys()
     })
 
-    model = model.tree_replace({
-        "geom_friction": friction,
-        "body_mass": body_mass,
-        "qpos0": qpos0,
-        "body_ipos": body_ipos,
-        "actuator_gainprm": actuator_gainprm,
-    })
+    # Update model with the randomized parameters.
+    model = model.tree_replace(model_updates)
 
     return model, in_axes
