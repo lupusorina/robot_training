@@ -62,6 +62,14 @@
         <joint name="L_YAW" pos="0 0 0" axis="0 0 1" limited="true" range="-0.3 0.3"/>
         <geom name="L_HIP" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="L_HIP"/>
 
+        <body name="L_SPRING_ROLL" pos="0 0 0">
+          <geom name="L_SPRING_ROLL" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+          <joint name="L_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
+
+          <body name="L_SPRING_PITCH" pos="0 0 0">
+            <geom name="L_SPRING_PITCH" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+            <joint name="L_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/>
+
         <body name="L_SHOULDER" pos="0.005 0 -0.086">
           <inertial pos="-0.0020134 -0.022813 -0.00077458" quat="0.5 0.5 0.5 0.5" mass="0.524" diaginertia="0.00068 0.00048 0.0003"/>
           <joint name="L_HAA" pos="0 0 0" axis="1 0 0" limited="true" range="-0.25 0.25"/>
@@ -87,14 +95,23 @@
             </body> <!--  L_LOWER_LEG -->
           </body> <!--  L_UPPER_LEG -->
         </body> <!--  L_SHOULDER -->
+          </body> <!--  L_SPRING_PITCH -->
+        </body> <!--  L_SPRING_ROLL -->
       </body> <!--  L_HIP -->
-
 
       <body name="R_HIP" pos="0 -0.07 -0.005">
         <inertial pos="-0.0542 0 -0.072" mass="0.624" diaginertia="0.0018 0.001 0.001"/>
         <joint name="R_YAW" pos="0 0 0" axis="0 0 1" limited="true" range="-0.3 0.3"/>
         <geom name="R_HIP" type="mesh" contype="0" conaffinity="0" rgba="0.69804 0.69804 0.69804 1" mesh="R_HIP"/>
-        
+
+        <body name="R_SPRING_ROLL" pos="0 0 0">
+          <geom name="R_SPRING_ROLL" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+          <joint name="R_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
+
+          <body name="R_SPRING_PITCH" pos="0 0 0">
+            <geom name="R_SPRING_PITCH" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+            <joint name="R_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/>
+
         <body name="R_SHOULDER" pos="0.005 0 -0.086">
           <inertial pos="-0.0020134 0.022813 -0.00077458" quat="0.5 0.5 0.5 0.5" mass="0.524" diaginertia="0.00068 0.00048 0.0003"/>
           <joint name="R_HAA" pos="0 0 0" axis="1 0 0" limited="true" range="-0.25 0.25"/>
@@ -121,8 +138,10 @@
           </body> <!--  R_UPPER_LEG -->
         </body> <!--  R_SHOULDER -->
       </body> <!--  R_HIP -->
-
+        </body> <!--  R_SPRING_PITCH -->
+      </body> <!--  R_SPRING_ROLL -->
     </body> <!--  base_link -->
+
   </worldbody>
 
       <!-- <actuator>
@@ -170,6 +189,13 @@
       <position name="R_HFE" joint="R_HFE" kp="38.1" kv="3.18"/>
       <position name="R_KFE" joint="R_KFE" kp="38.1" kv="0.95"/>
       <position name="R_ANKLE" joint="R_ANKLE" kp="0.1" kv="0.005"/>
+
+      <position joint="L_SPRING_ROLL" name="L_SPRING_ROLL" kp="65.55" kv="0.5"/>
+      <position joint="L_SPRING_PITCH" name="L_SPRING_PITCH" kp="140.0" kv="2.0"/>
+
+      <position joint="R_SPRING_ROLL" name="R_SPRING_ROLL" kp="65.55" kv="0.5"/>
+      <position joint="R_SPRING_PITCH" name="R_SPRING_PITCH" kp="140.0" kv="2.0"/>
+
     </actuator>
 
 </mujoco>
