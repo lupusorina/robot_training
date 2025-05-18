@@ -54,6 +54,7 @@ def default_config() -> config_dict.ConfigDict:
       episode_length=1000,
       action_repeat=1,
       history_len=3,
+      action_delay=1,
       soft_joint_pos_limit_factor=0.95,
       noise_config=config_dict.create(
           level=1.0,  # Set to 0.0 to disable noise.
@@ -368,6 +369,8 @@ class Biped(mjx_env.MjxEnv):
         "qpos": data.qpos,
         "qvel": data.qvel,
         "xfrc_applied": data.xfrc_applied,
+        # Initialize action history
+        "action_history": jp.zeros((self._config.action_delay + 1, self.mjx_model.nu)),
     }
 
     # Initialize the metrics.
@@ -419,8 +422,11 @@ class Biped(mjx_env.MjxEnv):
       action_complete = action_complete.at[self.policy_idx_to_actuator_idx_dict[policy_idx]].set(action[policy_idx])
 
     motor_targets = self._default_q_joints + action_complete
+    state.info["action_history"] = jp.roll(state.info["action_history"], -1, axis=0)
+    state.info["action_history"] = state.info["action_history"].at[-1].set(motor_targets)
+
     data = mjx_env.step(
-      self.mjx_model, state.data, motor_targets, self._n_substeps
+      self.mjx_model, state.data, state.info["action_history"][0], self._n_substeps
     )
     state.info["motor_targets"] = motor_targets
 
