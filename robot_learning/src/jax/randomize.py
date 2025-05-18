@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from etils import epath
+import mujoco
 
 FLOOR_GEOM_ID = 0
 TORSO_BODY_ID = 1
@@ -19,6 +20,7 @@ CONFIG_RANDOMIZE = {
   'randomize_qpos0': False,
   'randomize_body_ipos': False,
   'randomize_actuator_gainprm': False,
+  'randomize_spring_joints': False,
 }
 
 parser = argparse.ArgumentParser(description='Domain randomization configuration')
@@ -37,7 +39,8 @@ parser.add_argument('--randomize_body_ipos', action='store_true',
                     help='Randomize body center of mass offsets')
 parser.add_argument('--randomize_actuator_gainprm', action='store_true',
                     help='Randomize actuator gain parameters')
-
+parser.add_argument('--randomize_spring_joints', action='store_true',
+                    help='Randomize spring joints')
 args = parser.parse_args()
 
 # Update CONFIG_RANDOMIZE with command line arguments.
@@ -48,6 +51,7 @@ CONFIG_RANDOMIZE.update({
     'randomize_qpos0': args.randomize_qpos0,
     'randomize_body_ipos': args.randomize_body_ipos,
     'randomize_actuator_gainprm': args.randomize_actuator_gainprm,
+    'randomize_spring_joints': args.randomize_spring_joints,
 })
 
 # Testing: load the latest weights and test the policy.
@@ -67,7 +71,11 @@ with open(config_path, 'w') as f:
 with open(config_path, 'r') as f:
     CONFIG_RANDOMIZE = json.load(f)
 
-print(CONFIG_RANDOMIZE)
+folder_path = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
+# Read in the actuator mapping.
+with open(os.path.join(folder_path, 'idx_actuators_dict.json'), 'r') as f:
+    IDX_ACTUATORS_DICT = json.load(f)
+    print(f'IDX_ACTUATORS_DICT: {IDX_ACTUATORS_DICT}')
 
 def domain_randomize(model: mjx.Model, rng: jax.Array):
     @jax.vmap
@@ -123,12 +131,37 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         if CONFIG_RANDOMIZE['randomize_actuator_gainprm']:
             # Kp and Kv for the motors.
             actuator_gainprm = model.actuator_gainprm
+            actuator_biasprm = model.actuator_biasprm
             for i in range(model.nu):
+                # Get the name of the actuator.
                 kp_nominal = model.actuator_gainprm[i][0]
+                kd_nominal = model.actuator_biasprm[i][2]
                 rng, key = jax.random.split(rng)
                 dkp = jax.random.uniform(key, minval=0.9, maxval=1.1)
+                dkd = jax.random.uniform(key, minval=0.9, maxval=1.1)
                 actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal * dkp)
+                actuator_biasprm = actuator_biasprm.at[i, 1].set(-kp_nominal * dkp)
+                actuator_biasprm = actuator_biasprm.at[i, 2].set(kd_nominal * dkd)
+
             model_updates["actuator_gainprm"] = actuator_gainprm
+            model_updates["actuator_biasprm"] = actuator_biasprm
+
+        if CONFIG_RANDOMIZE['randomize_spring_joints']:
+            # Kp and Kv for the motors.
+            SPRING_JOINTS = ['L_SPRING_ROLL', 'L_SPRING_PITCH', 'R_SPRING_ROLL', 'R_SPRING_PITCH']
+            IDX_SPRING_JOINTS = [IDX_ACTUATORS_DICT[name] for name in SPRING_JOINTS]
+            actuator_gainprm = model.actuator_gainprm
+            actuator_biasprm = model.actuator_biasprm
+            for i in range(model.nu):
+                if i in IDX_SPRING_JOINTS:
+                    kp_nominal = model.actuator_gainprm[i][0]
+                    kd_nominal = model.actuator_biasprm[i][2]
+                    rng, key = jax.random.split(rng)
+                    dkp = jax.random.uniform(key, minval=0.9, maxval=1.1)
+                    dkd = jax.random.uniform(key, minval=0.9, maxval=1.1)
+                    actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal * dkp)
+                    actuator_biasprm = actuator_biasprm.at[i, 1].set(-kp_nominal * dkp)
+                    actuator_biasprm = actuator_biasprm.at[i, 2].set(kd_nominal * dkd)
 
         return model_updates
 
