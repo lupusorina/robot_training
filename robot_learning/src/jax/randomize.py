@@ -121,7 +121,7 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         if CONFIG_RANDOMIZE['randomize_body_ipos']:
             # Center of mass offset.
             rng, key = jax.random.split(rng)
-            com_offset = jax.random.uniform(key, shape=(3,), minval=-0.1, maxval=0.1)
+            com_offset = jax.random.uniform(key, shape=(3,), minval=-0.005, maxval=0.005)
             body_ipos = model.body_ipos
             body_ipos = body_ipos.at[TORSO_BODY_ID].set(
                 body_ipos[TORSO_BODY_ID] + com_offset

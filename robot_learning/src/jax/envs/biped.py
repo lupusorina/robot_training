@@ -972,7 +972,7 @@ def test_mujoco_biped():
   mj_data.ctrl = default_q_joints.copy()
   viewer = mujoco.viewer.launch_passive(mj_model, mj_data, key_callback=key_callback)
 
-  dh = 0.001
+  dh = 0.0005
 
   while viewer.is_running():
     mj_data.ctrl = default_q_joints.copy()
