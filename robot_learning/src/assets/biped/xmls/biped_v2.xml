@@ -18,7 +18,7 @@
     <mesh name="L_FOOT" file="L_FOOT.STL"/>
 
     <texture type="skybox" builtin="gradient" width="128" height="128" rgb1=".4 .6 .8" rgb2="0 0 0"/>
-  
+
     <texture builtin="checker" height="100" name="texplane" rgb1="0.14 0.31 0.27" rgb2="0.47 0.63 0.6" type="2d" width="100"/>
     <material name="MatPlane" reflectance="0.5" shininess="1" specular="1" texrepeat="60 60"  texture="texplane"/>
 
@@ -42,10 +42,10 @@
     <framepos objtype="site" objname="r_foot" name="r_foot_pos"/>
 
   </sensor>
-      <!-- <equality>
+  <!-- <equality>
 		<weld body1="base_link" solimp="1.0 1.0 1.0" solref="0.06 1"></weld>
 	</equality> -->
-
+ 
   <worldbody>
     <camera name="track" pos="1.805 -2.105 1.0" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971"/>
 
@@ -63,12 +63,12 @@
         <geom name="L_HIP" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="L_HIP"/>
 
         <body name="L_SPRING_ROLL" pos="0 0 0">
-          <geom name="L_SPRING_ROLL" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+          <geom name="L_SPRING_ROLL" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
           <joint name="L_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
 
           <body name="L_SPRING_PITCH" pos="0 0 0">
-            <geom name="L_SPRING_PITCH" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
-            <joint name="L_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/>
+            <geom name="L_SPRING_PITCH" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
+            <joint name="L_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/> 
 
         <body name="L_SHOULDER" pos="0.005 0 -0.086">
           <inertial pos="-0.0020134 -0.022813 -0.00077458" quat="0.5 0.5 0.5 0.5" mass="0.524" diaginertia="0.00068 0.00048 0.0003"/>
@@ -95,7 +95,7 @@
             </body> <!--  L_LOWER_LEG -->
           </body> <!--  L_UPPER_LEG -->
         </body> <!--  L_SHOULDER -->
-          </body> <!--  L_SPRING_PITCH -->
+        </body> <!--  L_SPRING_PITCH -->
         </body> <!--  L_SPRING_ROLL -->
       </body> <!--  L_HIP -->
 
@@ -105,11 +105,11 @@
         <geom name="R_HIP" type="mesh" contype="0" conaffinity="0" rgba="0.69804 0.69804 0.69804 1" mesh="R_HIP"/>
 
         <body name="R_SPRING_ROLL" pos="0 0 0">
-          <geom name="R_SPRING_ROLL" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+          <geom name="R_SPRING_ROLL" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
           <joint name="R_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
 
           <body name="R_SPRING_PITCH" pos="0 0 0">
-            <geom name="R_SPRING_PITCH" type="cylinder" contype="2" rgba="1 1 1 1" size="0.01 0.01"/>
+            <geom name="R_SPRING_PITCH" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
             <joint name="R_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/>
 
         <body name="R_SHOULDER" pos="0.005 0 -0.086">
@@ -137,9 +137,9 @@
             </body> <!--  R_LOWER_LEG -->
           </body> <!--  R_UPPER_LEG -->
         </body> <!--  R_SHOULDER -->
-      </body> <!--  R_HIP -->
         </body> <!--  R_SPRING_PITCH -->
-      </body> <!--  R_SPRING_ROLL -->
+        </body> <!--  R_SPRING_ROLL -->
+      </body> <!--  R_HIP -->
     </body> <!--  base_link -->
 
   </worldbody>
@@ -179,22 +179,25 @@
 
     <actuator>
       <position name="L_YAW" joint="L_YAW" kp="38.1" kv="0.5"/>
+
+      <position joint="L_SPRING_ROLL" name="L_SPRING_ROLL" kp="65.55" kv="0.5"/>
+      <position joint="L_SPRING_PITCH" name="L_SPRING_PITCH" kp="140.0" kv="2.0"/>
+
       <position name="L_HAA" joint="L_HAA" kp="38.1" kv="3.18"/>
       <position name="L_HFE" joint="L_HFE" kp="38.1" kv="3.18"/>
       <position name="L_KFE" joint="L_KFE" kp="38.1" kv="0.95"/>
       <position name="L_ANKLE" joint="L_ANKLE" kp="0.1" kv="0.005"/>
 
       <position name="R_YAW" joint="R_YAW" kp="38.1" kv="0.5"/>
+
+      <position joint="R_SPRING_ROLL" name="R_SPRING_ROLL" kp="65.55" kv="0.5"/>
+      <position joint="R_SPRING_PITCH" name="R_SPRING_PITCH" kp="140.0" kv="2.0"/>
+
       <position name="R_HAA" joint="R_HAA" kp="38.1" kv="3.18"/>
       <position name="R_HFE" joint="R_HFE" kp="38.1" kv="3.18"/>
       <position name="R_KFE" joint="R_KFE" kp="38.1" kv="0.95"/>
       <position name="R_ANKLE" joint="R_ANKLE" kp="0.1" kv="0.005"/>
 
-      <position joint="L_SPRING_ROLL" name="L_SPRING_ROLL" kp="65.55" kv="0.5"/>
-      <position joint="L_SPRING_PITCH" name="L_SPRING_PITCH" kp="140.0" kv="2.0"/>
-
-      <position joint="R_SPRING_ROLL" name="R_SPRING_ROLL" kp="65.55" kv="0.5"/>
-      <position joint="R_SPRING_PITCH" name="R_SPRING_PITCH" kp="140.0" kv="2.0"/>
 
     </actuator>
 
