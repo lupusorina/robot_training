@@ -27,5 +27,7 @@ ANKLE_AA_JOINT_NAMES = []
 
 SIDES = ["L", "R"]
 
-COSTS_JOINT_ANGLES = [1.0, 1.0, 0.01, 0.01, 1.0,  # left leg.
-                      1.0, 1.0, 0.01, 0.01, 1.0]  # right leg.
+                    # L_YAW L_SPRING_ROLL L_SPRING_PITCH L_HAA L_HFE L_KFE L_ANKLE
+                    # R_YAW R_SPRING_ROLL R_SPRING_PITCH R_HAA R_HFE R_KFE R_ANKLE
+COSTS_JOINT_ANGLES = [1.0, 0.0, 0.0, 1.0, 0.01, 0.01, 1.0,  # left leg.
+                      1.0, 0.0, 0.0, 1.0, 0.01, 0.01, 1.0]  # right leg.
