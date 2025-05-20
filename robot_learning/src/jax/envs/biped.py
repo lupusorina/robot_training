@@ -81,10 +81,8 @@ def default_config() -> config_dict.ConfigDict:
               base_height=0.0,
               # Energy related rewards.
               torques=-2.5e-4,
-              action_rate=-0.01,
-              energy=0.0,
+              action_rate=-2e-4,
               # Feet related rewards.
-              feet_clearance=0.0,
               feet_air_time=2.0,
               feet_slip=-0.25,
               feet_height=0.0,
@@ -98,7 +96,6 @@ def default_config() -> config_dict.ConfigDict:
               dof_pos_limits=-1.0,
               pose=-1.0,
           ),
-          tracking_sigma=0.5,
           max_foot_height=0.15,
           base_height_target=DESIRED_HEIGHT,
       ),
@@ -641,7 +638,6 @@ class Biped(mjx_env.MjxEnv):
         "action_rate": self._cost_action_rate(
             action, info["last_act"], info["last_last_act"]
         ),
-        "energy": self._cost_energy(data.qvel[6:], data.actuator_force),
         # Feet related rewards.
         "feet_slip": self._cost_feet_slip(data, contact, info),
         "feet_clearance": self._cost_feet_clearance(data, info),
@@ -673,11 +669,11 @@ class Biped(mjx_env.MjxEnv):
 
   def _reward_tracking_lin_vel(self, commands: jax.Array, local_vel: jax.Array, ) -> jax.Array:
     lin_vel_error = jp.sum(jp.square(commands[:2] - local_vel[:2]))
-    return jp.exp(-lin_vel_error / self._config.reward_config.tracking_sigma)
+    return jp.exp(-lin_vel_error)
 
   def _reward_tracking_ang_vel(self, commands: jax.Array, ang_vel: jax.Array, ) -> jax.Array:
     ang_vel_error = jp.square(commands[2] - ang_vel[2])
-    return jp.exp(-ang_vel_error / self._config.reward_config.tracking_sigma)
+    return jp.exp(-ang_vel_error)
 
   # Base-related rewards.
   def _cost_lin_vel_z(self, global_linvel) -> jax.Array:
@@ -690,20 +686,15 @@ class Biped(mjx_env.MjxEnv):
     return jp.sum(jp.square(torso_zaxis[:2]))
 
   def _cost_base_height(self, base_height: jax.Array) -> jax.Array:
-    # jax.debug.print(" {x}", x=base_height)
     return jp.square(base_height - self._config.reward_config.base_height_target)
 
   # Energy related rewards.
-
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sum(jp.abs(torques))
 
-  def _cost_energy(self, qvel: jax.Array, qfrc_actuator: jax.Array) -> jax.Array:
-    return jp.sum(jp.abs(qvel) * jp.abs(qfrc_actuator))
-
   def _cost_action_rate(self, act: jax.Array, last_act: jax.Array, last_last_act: jax.Array) -> jax.Array:
     del last_last_act  # Unused.
-    c1 = jp.sum(jp.square(act - last_act))
+    c1 = jp.sum(jp.square(act - last_act)/dt)
     return c1
 
   # Other rewards.
@@ -742,16 +733,6 @@ class Biped(mjx_env.MjxEnv):
     slip_cost = jp.sum(jp.linalg.norm(feet_vel_xy, axis=-1) * contact)
 
     return slip_cost
-
-  def _cost_feet_clearance(self, data: mjx.Data, info: dict[str, Any]) -> jax.Array:
-    del info  # Unused.
-    feet_vel = data.sensordata[self._foot_global_linvel_sensor_adr]
-    vel_xy = feet_vel[..., :2]
-    vel_norm = jp.sqrt(jp.linalg.norm(vel_xy, axis=-1))
-    foot_pos = data.site_xpos[self._feet_site_id]
-    foot_z = foot_pos[..., -1]
-    delta = jp.abs(foot_z - self._config.reward_config.max_foot_height)
-    return jp.sum(delta * vel_norm)
 
   def _cost_feet_height(
       self,
