@@ -60,13 +60,13 @@ def default_config() -> config_dict.ConfigDict:
           level=1.0,  # Set to 0.0 to disable noise.
           scales=config_dict.create(
               hip_pos=0.03,  # rad
-              kfe_pos=0.05,
-              ffe_pos=0.08,
-              faa_pos=0.03,
+              kfe_pos=0.05,  # rad
+              ffe_pos=0.08,  # rad
+              faa_pos=0.03,  # rad
               joint_vel=1.5,  # rad/s
               gravity=0.05,
-              linvel=0.1,
-              gyro=0.2,  # angvel.
+              linvel=0.1,  # m/s
+              gyro=0.2,  # angular vel.
           ),
       ),
       reward_config=config_dict.create(
