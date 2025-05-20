@@ -142,29 +142,25 @@ class Biped(mjx_env.MjxEnv):
     
     # Initialize the action space.
     self.idx_actuators_dict = {}
-    for i in range(0, self.mj_model.nu):  # skip root
+    for i in range(0, self.mj_model.nu):
         self.idx_actuators_dict[mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i)] = i
-    print(f'Model info:')
-    print(f'  Name actuators and corresponding index: {self.idx_actuators_dict}')
-    print(f'  self.mj_model.nu: {self.mj_model.nu}')
 
     self.name_joints = []
     for i in range(0, self.mj_model.njnt):
         self.name_joints.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, i))
     print(f'  Name joints: {self.name_joints}')
 
-    list_joint_names_to_ignore = ['root', 'L_SPRING_ROLL', 'L_SPRING_PITCH', 'R_SPRING_ROLL', 'R_SPRING_PITCH']
-
+    list_joint_names_to_ignore = ['root', 'L_SPRING_ROLL', 'L_SPRING_PITCH', \
+                                          'R_SPRING_ROLL', 'R_SPRING_PITCH']
     self.joint_idx_to_ignore_dict = {}
     for name in list_joint_names_to_ignore:
       if mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) == -1 or \
             mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) == 0:
         continue
-      self.joint_idx_to_ignore_dict[name] = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) - 1 # First joint is freejoint.
+      self.joint_idx_to_ignore_dict[name] = mujoco.mj_name2id(self.mj_model, \
+                                                              mujoco.mjtObj.mjOBJ_JOINT, name) - 1 # First joint is freejoint.
 
-    self.action_space = jp.zeros(self.action_size)
-    print(f'JOINT IDX TO IGNORE: {self.joint_idx_to_ignore_dict}')
-
+    # Mapping from joint names to the PPO action indices.
     self.actuated_joint_names_to_policy_idx_dict = {
       "L_YAW": 0,
       "L_HAA": 1,
@@ -175,16 +171,23 @@ class Biped(mjx_env.MjxEnv):
       "R_HFE": 6,
       "R_KFE": 7,
     }
-
     for name in self.actuated_joint_names_to_policy_idx_dict:
       assert name in self.idx_actuators_dict, f"{name} is not in {self.idx_actuators_dict.keys()}"
 
-
+    # MuJoCo actuator mapping.
     self.joint_names_to_actuator_idx_dict = { name: int(self.mj_model.joint(name).qposadr[0] - 7) \
                                               for name in self.idx_actuators_dict.keys() }
-
-    self.policy_idx_to_actuator_idx_dict = { self.actuated_joint_names_to_policy_idx_dict[name]: self.joint_names_to_actuator_idx_dict[name] 
+    print('self.joint_names_to_actuator_idx_dict: ', self.joint_names_to_actuator_idx_dict)
+    self.policy_idx_to_mujoco_actuator_idx_dict = { self.actuated_joint_names_to_policy_idx_dict[name]: self.joint_names_to_actuator_idx_dict[name] 
                                  for name in self.actuated_joint_names_to_policy_idx_dict }
+
+    # Initial configuration.
+    dict_initial_qpos = {}
+    for i in range(self.mj_model.njnt): # First joint is freejoint.
+      name = self.mj_model.joint(i).name
+      if name in self.joint_idx_to_ignore_dict.keys():
+        continue
+      dict_initial_qpos[name] = float(self._mj_model.keyframe("home").qpos[self.mj_model.joint(name).qposadr[0]])
 
     # Save config files.
     if save_config_folder is not None:
@@ -199,21 +202,14 @@ class Biped(mjx_env.MjxEnv):
  
       with open(os.path.join(save_config_folder, 'idx_actuators_dict.json'), 'w') as f:
         json.dump(self.idx_actuators_dict, f)
+
+      # Save the initial qpos to a file.
+        with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
+          json.dump(dict_initial_qpos, f)
+
     self._post_init()
 
-    dict_initial_qpos = {}
-    for i in range(self.mj_model.njnt): # First joint is freejoint.
-      name = self.mj_model.joint(i).name
-      if name in self.joint_idx_to_ignore_dict.keys():
-        continue
-      dict_initial_qpos[name] = float(self._mj_model.keyframe("home").qpos[self.mj_model.joint(name).qposadr[0]])
-
-    # Save the initial qpos to a file.
-    if save_config_folder is not None:
-      with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
-        json.dump(dict_initial_qpos, f)
-
-    # Initialize state history buffers
+    # Initialize state history buffers.
     self._state_history = None
     self._privileged_state_history = None
 
@@ -223,56 +219,42 @@ class Biped(mjx_env.MjxEnv):
     # Initialize the initial state.
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
     self._default_q_joints = jp.array(self._mj_model.keyframe("home").qpos[7:])
-    self._default_q_joints_without_spring = jp.array([self._default_q_joints[i] for i in range(len(self._default_q_joints)) if i not in self.joint_idx_to_ignore_dict.values()])
+    self._default_q_joints_without_spring = jp.array([self._default_q_joints[i] for i in range(len(self._default_q_joints)) \
+                                                      if i not in self.joint_idx_to_ignore_dict.values()])
 
-    print('model.actuator_gainprm: ', self.mjx_model.actuator_gainprm)
-    print('model.actuator_biasprm: ', self.mjx_model.actuator_biasprm)
     # Initialize the soft limits.
-    q_j_min, q_j_max = self.mj_model.jnt_range[1:].T # Note: First joint is freejoint.
-    c = (q_j_min + q_j_max) / 2
-    r = q_j_max - q_j_min
+    self._q_j_min, self._q_j_max = self.mj_model.jnt_range[1:].T # Note: First joint is freejoint.
+    c = (self._q_j_min + self._q_j_max) / 2
+    r = self._q_j_max - self._q_j_min
     self._soft_q_j_min = c - 0.5 * r * self._config.soft_joint_pos_limit_factor
     self._soft_q_j_max = c + 0.5 * r * self._config.soft_joint_pos_limit_factor
 
     # Initialize the noise scale.
     q_j_noise_scale = np.zeros(self.mj_model.nu)
 
-    hip_indices = []
-    hip_joint_names = robot_config.HIP_JOINT_NAMES
-    if len(hip_joint_names) != 0:
-        for side in robot_config.SIDES:
-            for joint_name in hip_joint_names:
-                hip_indices.append(self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7)
-        self._hip_indices = jp.array(hip_indices) # For hip reward deviation.
-        q_j_noise_scale[self._hip_indices] = self._config.noise_config.scales.hip_pos
+    def get_joint_indices(joint_names, sides=robot_config.SIDES):
+        return jp.array([
+            self._mj_model.joint(f"{side}_{joint_name}").qposadr[0] - 7
+            for side in sides
+            for joint_name in joint_names
+        ])
 
-    knee_indices = []
-    knee_joint_names = robot_config.KNEE_JOINT_NAMES
-    if len(knee_joint_names) != 0:
-        for side in robot_config.SIDES:
-            for knee_joint_name in knee_joint_names:
-                knee_indices.append(self._mj_model.joint(f"{side}_{knee_joint_name}").qposadr[0] - 7)
-        self._knee_indices = jp.array(knee_indices) # For knee reward deviation.
-        q_j_noise_scale[self._knee_indices] = self._config.noise_config.scales.kfe_pos
+    # Set noise scales for different joint types
+    joint_configs = {
+        'hip': (robot_config.HIP_JOINT_NAMES, self._config.noise_config.scales.hip_pos),
+        'knee': (robot_config.KNEE_JOINT_NAMES, self._config.noise_config.scales.kfe_pos),
+        'ffe': (robot_config.ANKLE_FE_JOINT_NAMES, self._config.noise_config.scales.ffe_pos),
+        'faa': (robot_config.ANKLE_AA_JOINT_NAMES, self._config.noise_config.scales.faa_pos)
+    }
 
-    ffe_joint_names = robot_config.ANKLE_FE_JOINT_NAMES
-    if len(ffe_joint_names) != 0:
-        ffe_indices = []
-        for side in robot_config.SIDES:
-            for ffe_joint_name in ffe_joint_names:
-                ffe_indices.append(self._mj_model.joint(f"{side}_{ffe_joint_name}").qposadr[0] - 7)
-        self._ffe_indices = jp.array(ffe_indices) # For ffe reward deviation.
-        q_j_noise_scale[self._ffe_indices] = self._config.noise_config.scales.ffe_pos
+    for joint_type, (joint_names, scale) in joint_configs.items():
+        if len(joint_names) > 0:
+            indices = get_joint_indices(joint_names)
+            setattr(self, f'_{joint_type}_indices', indices)
+            q_j_noise_scale[indices] = scale
 
-    faa_joint_names = robot_config.ANKLE_AA_JOINT_NAMES
-    if len(faa_joint_names) != 0:
-        faa_indices = []
-        for side in robot_config.SIDES:
-            for faa_joint_name in faa_joint_names:
-                faa_indices.append(self._mj_model.joint(f"{side}_{faa_joint_name}").qposadr[0] - 7)
-        self._faa_indices = jp.array(faa_indices) # For faa reward deviation.
-        q_j_noise_scale[self._faa_indices] = self._config.noise_config.scales.faa_pos
     self._q_j_noise_scale = jp.array(q_j_noise_scale)
+    assert len(self._q_j_noise_scale) == self.mj_model.nu, f"q_j_noise_scale must have the same length as the number of joints, {len(self._q_j_noise_scale)} != {self.mj_model.nu}"
 
     # Initialize the site and geom ids.
     self._imu_site_id = self._mj_model.site(IMU_SITE).id
@@ -286,9 +268,7 @@ class Biped(mjx_env.MjxEnv):
       sensor_id = self._mj_model.sensor(f"{site}_global_linvel").id
       sensor_adr = self._mj_model.sensor_adr[sensor_id]
       sensor_dim = self._mj_model.sensor_dim[sensor_id]
-      foot_global_linvel_sensor_adr.append(
-          list(range(sensor_adr, sensor_adr + sensor_dim))
-      )
+      foot_global_linvel_sensor_adr.append(list(range(sensor_adr, sensor_adr + sensor_dim)))
     self._foot_global_linvel_sensor_adr = jp.array(foot_global_linvel_sensor_adr)
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
@@ -419,7 +399,7 @@ class Biped(mjx_env.MjxEnv):
     for name, policy_idx in self.actuated_joint_names_to_policy_idx_dict.items():
       if policy_idx is None:
         continue
-      action_complete = action_complete.at[self.policy_idx_to_actuator_idx_dict[policy_idx]].set(action[policy_idx])
+      action_complete = action_complete.at[self.policy_idx_to_mujoco_actuator_idx_dict[policy_idx]].set(action[policy_idx])
 
     motor_targets = self._default_q_joints + action_complete
     state.info["action_history"] = jp.roll(state.info["action_history"], -1, axis=0)
