@@ -620,7 +620,6 @@ class Biped(mjx_env.MjxEnv):
         ),
         # Feet related rewards.
         "feet_slip": self._cost_feet_slip(data, contact, info),
-        "feet_clearance": self._cost_feet_clearance(data, info),
         "feet_height": self._cost_feet_height(
             info["swing_peak"], first_contact, info
         ),
@@ -674,7 +673,7 @@ class Biped(mjx_env.MjxEnv):
 
   def _cost_action_rate(self, act: jax.Array, last_act: jax.Array, last_last_act: jax.Array) -> jax.Array:
     del last_last_act  # Unused.
-    c1 = jp.sum(jp.square(act - last_act)/dt)
+    c1 = jp.sum(jp.square(act - last_act)/self._config.ctrl_dt)
     return c1
 
   # Other rewards.
