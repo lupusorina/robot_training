@@ -1,9 +1,6 @@
 ## Performance
 
-<video width="320" height="240" autoplay muted loop playsinline>
-  <source src="video.mp4" type="video/mp4">
-</video>
-
+![Video](./video.gif)
 
 ## Install requirements
 
