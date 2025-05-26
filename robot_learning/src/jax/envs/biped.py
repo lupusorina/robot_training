@@ -393,7 +393,7 @@ class Biped(mjx_env.MjxEnv):
 
     # Step the model.
     action_complete = jp.zeros(self.mjx_model.nu)
-    for name, policy_idx in self.actuated_joint_names_to_policy_idx_dict.items():
+    for _, policy_idx in self.actuated_joint_names_to_policy_idx_dict.items():
       if policy_idx is None:
         continue
       action_complete = action_complete.at[self.policy_idx_to_mujoco_actuator_idx_dict[policy_idx]].set(action[policy_idx])
