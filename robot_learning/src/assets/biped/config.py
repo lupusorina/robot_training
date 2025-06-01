@@ -2,6 +2,7 @@ import os
 
 parent_dir = os.path.abspath(os.path.join(os.getcwd()))
 XML_PATH = os.path.join(parent_dir, '../assets/biped/xmls/scene_mjx_feetonly_flat_terrain.xml')
+# XML_PATH = os.path.join(parent_dir, 'robot_learning/src/assets/biped/xmls/scene_mjx_feetonly_flat_terrain.xml')
 
 # XML_PATH = os.path.join(parent_dir, '../../assets/biped/xmls/scene_mjx_feetonly_flat_terrain.xml')
 

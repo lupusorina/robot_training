@@ -113,7 +113,7 @@ if "network_factory" in ppo_params:
       **ppo_params.network_factory
   )
 
-from randomize import domain_randomize
+from robot_learning.src.jax.randomize import domain_randomize
 
 train_fn = functools.partial(
     ppo.train, **dict(ppo_training_params),

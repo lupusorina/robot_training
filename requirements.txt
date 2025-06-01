@@ -2,6 +2,10 @@ matplotlib
 mediapy
 brax
 jax[cuda12]
+# brax==0.12.3
+# jax[cuda12]==0.5.1
 imageio
 gymnasium
-brax==0.12.3
+mujoco
+tqdm
+torch
