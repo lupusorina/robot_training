@@ -14,13 +14,38 @@ TORSO_BODY_ID = 1
 TORSO_BODY_NAME = "base_link"
 
 CONFIG_RANDOMIZE = {
-  'randomize_floor_friction': False,
-  'randomize_link_masses': False,
-  'randomize_torso_mass': False,
-  'randomize_qpos0': False,
-  'randomize_body_ipos': False,
-  'randomize_actuator_gainprm': False,
-  'randomize_spring_joints': False,
+  'randomize_floor_friction': {
+    'enable': False,
+    'minval': 0.4,
+    'maxval': 1.0,
+  },
+  'randomize_link_masses': {
+    'enable': False,
+    'minval': 0.9, # Percentage of the original mass
+    'maxval': 1.1, # Percentage of the original mass
+  },
+  'randomize_torso_mass': {
+    'enable': False,
+    'minval': -0.5,
+    'maxval': 0.5,
+  },
+  'randomize_qpos0':
+  {
+    'enable': False,
+    'minval': -0.1,
+    'maxval': 0.1,
+  },
+  'randomize_body_ipos': {
+    'enable': False,
+    'minval': -0.01,
+    'maxval': 0.01,
+  },
+  'randomize_actuator_gainprm':
+  {
+    'enable': False,
+    'minval': 0.9,
+    'maxval': 1.1,
+  },
 }
 
 parser = argparse.ArgumentParser(description='Domain randomization configuration')
@@ -39,19 +64,36 @@ parser.add_argument('--randomize_body_ipos', action='store_true',
                     help='Randomize body center of mass offsets')
 parser.add_argument('--randomize_actuator_gainprm', action='store_true',
                     help='Randomize actuator gain parameters')
-parser.add_argument('--randomize_spring_joints', action='store_true',
-                    help='Randomize spring joints')
 args = parser.parse_args()
 
 # Update CONFIG_RANDOMIZE with command line arguments.
 CONFIG_RANDOMIZE.update({
-    'randomize_floor_friction': args.randomize_floor_friction,
-    'randomize_link_masses': args.randomize_link_masses,
-    'randomize_torso_mass': args.randomize_torso_mass,
-    'randomize_qpos0': args.randomize_qpos0,
-    'randomize_body_ipos': args.randomize_body_ipos,
-    'randomize_actuator_gainprm': args.randomize_actuator_gainprm,
-    'randomize_spring_joints': args.randomize_spring_joints,
+    'randomize_floor_friction': {
+      'enable': args.randomize_floor_friction,
+      'minval': 0.4,
+      'maxval': 1.0,
+    },
+    'randomize_link_masses': {
+      'enable': args.randomize_link_masses,
+      'minval': 0.9,
+      'maxval': 1.1,
+    },
+    'randomize_torso_mass': {
+      'enable': args.randomize_torso_mass,
+      'minval': -0.5,
+      'maxval': 0.5,
+    },
+    'randomize_qpos0': {
+      'enable': args.randomize_qpos0,
+      'minval': -0.1,
+      'maxval': 0.1,
+    },
+    'randomize_actuator_gainprm': {
+      'enable': args.randomize_actuator_gainprm,
+      'minval': 0.9,
+      'maxval': 1.1,
+    },
+
 })
 
 # Testing: load the latest weights and test the policy.
@@ -82,53 +124,53 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
     def rand_dynamics(rng):
         model_updates = {}
 
-        if CONFIG_RANDOMIZE['randomize_floor_friction']:
+        if CONFIG_RANDOMIZE['randomize_floor_friction']['enable']:
             # Floor friction: =U(0.4, 1.0).
             rng, key = jax.random.split(rng)
             geom_friction = model.geom_friction.at[FLOOR_GEOM_ID, 0].set(
-                jax.random.uniform(key, minval=0.4, maxval=1.0)
+                jax.random.uniform(key, minval=CONFIG_RANDOMIZE['randomize_floor_friction']['minval'], maxval=CONFIG_RANDOMIZE['randomize_floor_friction']['maxval'])
             )
             model_updates["geom_friction"] = geom_friction
 
-        if CONFIG_RANDOMIZE['randomize_link_masses']:
+        if CONFIG_RANDOMIZE['randomize_link_masses']['enable']:
             # Scale all link masses: *U(0.9, 1.1).
             rng, key = jax.random.split(rng)
             dmass = jax.random.uniform(
-                key, shape=(model.nbody,), minval=0.9, maxval=1.1
+                key, shape=(model.nbody,), minval=CONFIG_RANDOMIZE['randomize_link_masses']['minval'], maxval=CONFIG_RANDOMIZE['randomize_link_masses']['maxval']
             )
             body_mass = model.body_mass.at[:].set(model.body_mass * dmass)
             model_updates["body_mass"] = body_mass
 
-        if CONFIG_RANDOMIZE['randomize_torso_mass']:
+        if CONFIG_RANDOMIZE['randomize_torso_mass']['enable']:
             # Add mass to torso: +U(-1.0, 1.0).
             rng, key = jax.random.split(rng)
-            dmass = jax.random.uniform(key, minval=-1.0, maxval=1.0)
+            dmass = jax.random.uniform(key, minval=CONFIG_RANDOMIZE['randomize_torso_mass']['minval'], maxval=CONFIG_RANDOMIZE['randomize_torso_mass']['maxval'])
             body_mass = model.body_mass.at[TORSO_BODY_ID].set(
                 model.body_mass[TORSO_BODY_ID] + dmass
             )
             model_updates["body_mass"] = body_mass
 
-        if CONFIG_RANDOMIZE['randomize_qpos0']:
+        if CONFIG_RANDOMIZE['randomize_qpos0']['enable']:
             # Jitter qpos0: +U(-0.1, 0.1).
             rng, key = jax.random.split(rng)
             qpos0 = model.qpos0
             qpos0 = qpos0.at[7:].set(
                 qpos0[7:]
-                + jax.random.uniform(key, shape=(10,), minval=-0.1, maxval=0.1)
+                + jax.random.uniform(key, shape=(10,), minval=CONFIG_RANDOMIZE['randomize_qpos0']['minval'], maxval=CONFIG_RANDOMIZE['randomize_qpos0']['maxval'])
             )
             model_updates["qpos0"] = qpos0
 
-        if CONFIG_RANDOMIZE['randomize_body_ipos']:
+        if CONFIG_RANDOMIZE['randomize_body_ipos']['enable']:
             # Center of mass offset.
             rng, key = jax.random.split(rng)
-            com_offset = jax.random.uniform(key, shape=(3,), minval=-0.005, maxval=0.005)
+            com_offset = jax.random.uniform(key, shape=(3,), minval=CONFIG_RANDOMIZE['randomize_body_ipos']['minval'], maxval=CONFIG_RANDOMIZE['randomize_body_ipos']['maxval'])
             body_ipos = model.body_ipos
             body_ipos = body_ipos.at[TORSO_BODY_ID].set(
                 body_ipos[TORSO_BODY_ID] + com_offset
             )
             model_updates["body_ipos"] = body_ipos
 
-        if CONFIG_RANDOMIZE['randomize_actuator_gainprm']:
+        if CONFIG_RANDOMIZE['randomize_actuator_gainprm']['enable']:
             # Kp and Kv for the motors.
             actuator_gainprm = model.actuator_gainprm
             actuator_biasprm = model.actuator_biasprm
@@ -137,32 +179,14 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
                 kp_nominal = model.actuator_gainprm[i][0]
                 kd_nominal = model.actuator_biasprm[i][2]
                 rng, key = jax.random.split(rng)
-                dkp = jax.random.uniform(key, minval=0.9, maxval=1.1)
-                dkd = jax.random.uniform(key, minval=0.9, maxval=1.1)
+                dkp = jax.random.uniform(key, minval=CONFIG_RANDOMIZE['randomize_actuator_gainprm']['minval'], maxval=CONFIG_RANDOMIZE['randomize_actuator_gainprm']['maxval'])
+                dkd = jax.random.uniform(key, minval=CONFIG_RANDOMIZE['randomize_actuator_gainprm']['minval'], maxval=CONFIG_RANDOMIZE['randomize_actuator_gainprm']['maxval'])
                 actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal * dkp)
                 actuator_biasprm = actuator_biasprm.at[i, 1].set(-kp_nominal * dkp)
                 actuator_biasprm = actuator_biasprm.at[i, 2].set(kd_nominal * dkd)
 
             model_updates["actuator_gainprm"] = actuator_gainprm
             model_updates["actuator_biasprm"] = actuator_biasprm
-
-        if CONFIG_RANDOMIZE['randomize_spring_joints']:
-            # Kp and Kv for the motors.
-            SPRING_JOINTS = ['L_SPRING_ROLL', 'L_SPRING_PITCH', 'R_SPRING_ROLL', 'R_SPRING_PITCH']
-            IDX_SPRING_JOINTS = [IDX_ACTUATORS_DICT[name] for name in SPRING_JOINTS]
-            actuator_gainprm = model.actuator_gainprm
-            actuator_biasprm = model.actuator_biasprm
-            for i in range(model.nu):
-                if i in IDX_SPRING_JOINTS:
-                    kp_nominal = model.actuator_gainprm[i][0]
-                    kd_nominal = model.actuator_biasprm[i][2]
-                    rng, key = jax.random.split(rng)
-                    dkp = jax.random.uniform(key, minval=0.9, maxval=1.1)
-                    dkd = jax.random.uniform(key, minval=0.9, maxval=1.1)
-                    actuator_gainprm = actuator_gainprm.at[i, 0].set(kp_nominal * dkp)
-                    actuator_biasprm = actuator_biasprm.at[i, 1].set(-kp_nominal * dkp)
-                    actuator_biasprm = actuator_biasprm.at[i, 2].set(kd_nominal * dkd)
-
         return model_updates
 
     model_updates = rand_dynamics(rng)
