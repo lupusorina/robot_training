@@ -148,8 +148,7 @@ class Biped(mjx_env.MjxEnv):
         self.name_joints.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, i))
     print(f'  Name joints: {self.name_joints}')
 
-    list_joint_names_to_ignore = ['root', 'L_SPRING_ROLL', 'L_SPRING_PITCH', \
-                                          'R_SPRING_ROLL', 'R_SPRING_PITCH']
+    list_joint_names_to_ignore = ['root']
     self.joint_idx_to_ignore_dict = {}
     for name in list_joint_names_to_ignore:
       if mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) == -1 or \
