@@ -4,6 +4,16 @@
     <flag eulerdamp="disable"/>
   </option>
   <default/>
+
+  <visual>
+    <headlight diffuse=".8 .8 .8" ambient=".2 .2 .2" specular="1 1 1"/>
+    <rgba force="1 0 0 1"/>
+    <global azimuth="120" elevation="-20"/>
+    <map force="0.01"/>
+    <scale forcewidth="0.3" contactwidth="0.5" contactheight="0.2"/>
+    <quality shadowsize="8192"/>
+  </visual>
+
   <asset>
     <mesh name="base_link" file="base_link.STL"/>
     <mesh name="R_HIP" file="R_HIP.STL"/>
@@ -17,12 +27,15 @@
     <mesh name="L_LOWER_LEG" file="L_LOWER_LEG.STL"/>
     <mesh name="L_FOOT" file="L_FOOT.STL"/>
 
-    <texture type="skybox" builtin="gradient" width="128" height="128" rgb1=".4 .6 .8" rgb2="0 0 0"/>
-
-    <texture builtin="checker" height="100" name="texplane" rgb1="0.14 0.31 0.27" rgb2="0.47 0.63 0.6" type="2d" width="100"/>
-    <material name="MatPlane" reflectance="0.5" shininess="1" specular="1" texrepeat="60 60"  texture="texplane"/>
-
+    <texture type="skybox" builtin="gradient" rgb1="1 1 1" rgb2="1 1 1" width="800" height="800"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="1 1 1" rgb2="1 1 1" markrgb="0 0 0"
+      width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0"/>
   </asset>
+
+  <worldbody>
+    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1" friction="0.6" condim="3"/>
+  </worldbody>
 
   <sensor>
     <gyro name="gyro" site="imu_location_vectornav" />
@@ -40,18 +53,17 @@
     <framexaxis objtype="site" objname="r_foot" name="r_foot_upvector"/>
     <framepos objtype="site" objname="l_foot" name="l_foot_pos"/>
     <framepos objtype="site" objname="r_foot" name="r_foot_pos"/>
-
   </sensor>
   <!-- <equality>
 		<weld body1="base_link" solimp="1.0 1.0 1.0" solref="0.06 1"></weld>
 	</equality> -->
- 
+
   <worldbody>
     <camera name="track" pos="1.805 -2.105 1.0" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971"/>
 
     <body name="base_link" pos="0.0 0.0 1.0">
     <camera name="front" pos="1.210 -0.435 0.32" xyaxes="0.342 0.940 0.000 -0.321 0.117 0.940" mode="trackcom"/>
-      <inertial pos="0.091 0 0.068" quat="1. 0. 0. 0." mass="3.272" diaginertia="0.018 0.030 0.026" />
+      <inertial pos="-0.06 0 0.068" quat="1. 0. 0. 0." mass="3.272" diaginertia="0.018 0.030 0.026" />
       <geom name="base_link" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="base_link"/>
       <joint armature="0" damping="0" limited="false" name="root" pos="0 0 0" stiffness="0" type="free"/>
       <site name="imu_location" pos="0 0 0" euler="0 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
@@ -61,14 +73,6 @@
         <inertial pos="-0.0542 0 -0.072" mass="0.624" diaginertia="0.0018 0.001 0.001"/>
         <joint name="L_YAW" pos="0 0 0" axis="0 0 1" limited="true" range="-0.3 0.3"/>
         <geom name="L_HIP" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="L_HIP"/>
-
-        <body name="L_SPRING_ROLL" pos="0 0 0">
-          <geom name="L_SPRING_ROLL" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
-          <joint name="L_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
-
-          <body name="L_SPRING_PITCH" pos="0 0 0">
-            <geom name="L_SPRING_PITCH" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
-            <joint name="L_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/> 
 
         <body name="L_SHOULDER" pos="0.005 0 -0.086">
           <inertial pos="-0.0020134 -0.022813 -0.00077458" quat="0.5 0.5 0.5 0.5" mass="0.524" diaginertia="0.00068 0.00048 0.0003"/>
@@ -95,22 +99,12 @@
             </body> <!--  L_LOWER_LEG -->
           </body> <!--  L_UPPER_LEG -->
         </body> <!--  L_SHOULDER -->
-        </body> <!--  L_SPRING_PITCH -->
-        </body> <!--  L_SPRING_ROLL -->
       </body> <!--  L_HIP -->
 
       <body name="R_HIP" pos="0 -0.07 -0.005">
         <inertial pos="-0.0542 0 -0.072" mass="0.624" diaginertia="0.0018 0.001 0.001"/>
         <joint name="R_YAW" pos="0 0 0" axis="0 0 1" limited="true" range="-0.3 0.3"/>
         <geom name="R_HIP" type="mesh" contype="0" conaffinity="0" rgba="0.69804 0.69804 0.69804 1" mesh="R_HIP"/>
-
-        <body name="R_SPRING_ROLL" pos="0 0 0">
-          <geom name="R_SPRING_ROLL" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
-          <joint name="R_SPRING_ROLL" pos="0 0 0" axis="1 0 0"/>
-
-          <body name="R_SPRING_PITCH" pos="0 0 0">
-            <geom name="R_SPRING_PITCH" type="cylinder" contype="0" conaffinity="0" rgba="1 1 1 1" size="0.01 0.01"/>
-            <joint name="R_SPRING_PITCH" pos="0 0 0" axis="0 1 0"/>
 
         <body name="R_SHOULDER" pos="0.005 0 -0.086">
           <inertial pos="-0.0020134 0.022813 -0.00077458" quat="0.5 0.5 0.5 0.5" mass="0.524" diaginertia="0.00068 0.00048 0.0003"/>
@@ -137,51 +131,13 @@
             </body> <!--  R_LOWER_LEG -->
           </body> <!--  R_UPPER_LEG -->
         </body> <!--  R_SHOULDER -->
-        </body> <!--  R_SPRING_PITCH -->
-        </body> <!--  R_SPRING_ROLL -->
       </body> <!--  R_HIP -->
     </body> <!--  base_link -->
 
   </worldbody>
 
-      <!-- <actuator>
-
-        <motor gear="1"  joint="L_YAW" name="L_YAW"/>
-            <velocity gear="1" joint="L_YAW" name="L_YAW_VEL" kv="0.5" />
-
-        <motor gear="1"  joint="L_HAA" name="L_HAA"/>
-            <velocity gear="1" joint="L_HAA" name="L_HAA_VEL" kv="3.18" />
-
-        <motor gear="1"  joint="L_HFE" name="L_HFE"/>
-            <velocity gear="1" joint="L_HFE" name="L_HFE_VEL" kv="3.18" />
-
-        <motor gear="1"  joint="L_KFE" name="L_KFE"/>
-            <velocity gear="1" joint="L_KFE" name="L_KFE_VEL" kv="0.95" />
-
-        <motor gear="1"  joint="L_ANKLE" name="L_ANKLE"/>
-            <velocity gear="1" joint="L_ANKLE" name="L_ANKLE_VEL" kv="0.005" />
-
-        <motor gear="1"  joint="R_YAW" name="R_YAW"/>
-            <velocity gear="1" joint="R_YAW" name="R_YAW_VEL" kv="0.5" />
-
-        <motor gear="1"  joint="R_HAA" name="R_HAA"/>
-            <velocity gear="1" joint="R_HAA" name="R_HAA_VEL" kv="3.18" />
-
-        <motor gear="1"  joint="R_HFE" name="R_HFE"/>
-            <velocity gear="1" joint="R_HFE" name="R_HFE_VEL" kv="3.18" />
-
-        <motor gear="1"  joint="R_KFE" name="R_KFE"/>
-            <velocity gear="1" joint="R_KFE" name="R_KFE_VEL" kv="0.95" />
-
-        <motor gear="1"  joint="R_ANKLE" name="R_ANKLE"/>
-            <velocity gear="1" joint="R_ANKLE" name="R_ANKLE_VEL" kv="0.005" />
-    </actuator> -->
-
     <actuator>
       <position name="L_YAW" joint="L_YAW" kp="38.1" kv="0.5"/>
-
-      <position joint="L_SPRING_ROLL" name="L_SPRING_ROLL" kp="65.55" kv="0.5"/>
-      <position joint="L_SPRING_PITCH" name="L_SPRING_PITCH" kp="140.0" kv="2.0"/>
 
       <position name="L_HAA" joint="L_HAA" kp="38.1" kv="3.18"/>
       <position name="L_HFE" joint="L_HFE" kp="38.1" kv="3.18"/>
@@ -190,15 +146,23 @@
 
       <position name="R_YAW" joint="R_YAW" kp="38.1" kv="0.5"/>
 
-      <position joint="R_SPRING_ROLL" name="R_SPRING_ROLL" kp="65.55" kv="0.5"/>
-      <position joint="R_SPRING_PITCH" name="R_SPRING_PITCH" kp="140.0" kv="2.0"/>
-
       <position name="R_HAA" joint="R_HAA" kp="38.1" kv="3.18"/>
       <position name="R_HFE" joint="R_HFE" kp="38.1" kv="3.18"/>
       <position name="R_KFE" joint="R_KFE" kp="38.1" kv="0.95"/>
       <position name="R_ANKLE" joint="R_ANKLE" kp="0.1" kv="0.005"/>
 
-
     </actuator>
+
+    <keyframe>
+      <key name="home"
+          qpos="
+        0 0 0.7
+        1 0 0 0
+        0.0 0.0 -0.65 0.983 -0.35
+        0.0 -0.0 -0.65 0.983 -0.35"
+          ctrl="
+        0.0 0.0 -0.65 0.983 -0.35
+        0.0 0.0 -0.65 0.983 -0.35"/>
+  </keyframe>
 
 </mujoco>
