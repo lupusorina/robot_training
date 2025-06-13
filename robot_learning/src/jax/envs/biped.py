@@ -22,6 +22,7 @@ import robot_learning.src.jax.mjx_env as mjx_env
 
 import os
 import json
+import shutil
 
 import time
 
@@ -203,6 +204,9 @@ class Biped(mjx_env.MjxEnv):
       # Save the initial qpos to a file.
         with open(os.path.join(save_config_folder, 'initial_qpos.json'), 'w') as f:
           json.dump(dict_initial_qpos, f)
+
+      # Copy over the biped_v2.xml file.
+      shutil.copy(XML_PATH, os.path.join(save_config_folder, 'biped_v2.xml'))
 
     self._post_init()
 
