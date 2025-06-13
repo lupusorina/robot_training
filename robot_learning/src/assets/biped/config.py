@@ -1,10 +1,10 @@
 import os
 
 parent_dir = os.path.abspath(os.path.join(os.getcwd()))
-XML_PATH = os.path.join(parent_dir, '../assets/biped/xmls/biped_v2.xml')
-# XML_PATH = os.path.join(parent_dir, 'robot_learning/src/assets/biped/xmls/biped_v2.xml')
+XML_PATH = os.path.join(parent_dir, '../assets/biped/xmls/biped_RL.xml')
+# XML_PATH = os.path.join(parent_dir, 'robot_learning/src/assets/biped/xmls/biped_RL.xml')
 
-# XML_PATH = os.path.join(parent_dir, '../../assets/biped/xmls/biped_v2.xml')
+# XML_PATH = os.path.join(parent_dir, '../../assets/biped/xmls/biped_RL.xml')
 
 ROOT_BODY = "base_link"
 FEET_SITES = ["l_foot", "r_foot"]
