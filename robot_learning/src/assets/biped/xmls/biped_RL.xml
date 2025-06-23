@@ -1,6 +1,6 @@
 <mujoco model="biped">
-  <compiler angle="radian" meshdir="meshes" autolimits="true"/>
-  <option iterations="3" ls_iterations="5" timestep="0.001" integrator="Euler">
+  <compiler angle="radian" meshdir="../meshes" autolimits="true"/>
+  <option iterations="3" ls_iterations="5" integrator="Euler">
     <flag eulerdamp="disable"/>
   </option>
   <default/>
@@ -15,7 +15,7 @@
   </visual>
 
   <asset>
-    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="base_link_v2" file="base_link_v2.STL"/>
     <mesh name="R_HIP" file="R_HIP.STL"/>
     <mesh name="R_SHOULDER" file="R_SHOULDER.STL"/>
     <mesh name="R_UPPER_LEG" file="R_UPPER_LEG.STL"/>
@@ -31,11 +31,8 @@
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="1 1 1" rgb2="1 1 1" markrgb="0 0 0"
       width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0"/>
-  </asset>
 
-  <worldbody>
-    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1" friction="0.6" condim="3"/>
-  </worldbody>
+  </asset>
 
   <sensor>
     <gyro name="gyro" site="imu_location_vectornav" />
@@ -53,18 +50,21 @@
     <framexaxis objtype="site" objname="r_foot" name="r_foot_upvector"/>
     <framepos objtype="site" objname="l_foot" name="l_foot_pos"/>
     <framepos objtype="site" objname="r_foot" name="r_foot_pos"/>
+    
   </sensor>
   <!-- <equality>
 		<weld body1="base_link" solimp="1.0 1.0 1.0" solref="0.06 1"></weld>
 	</equality> -->
 
   <worldbody>
+    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1" friction="0.6" condim="3"/>
+
     <camera name="track" pos="1.805 -2.105 1.0" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971"/>
 
     <body name="base_link" pos="0.0 0.0 1.0">
     <camera name="front" pos="1.210 -0.435 0.32" xyaxes="0.342 0.940 0.000 -0.321 0.117 0.940" mode="trackcom"/>
       <inertial pos="-0.1048 0 0.068" quat="1. 0. 0. 0." mass="3.272" diaginertia="0.018 0.030 0.026" />
-      <geom name="base_link" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="base_link"/>
+      <geom name="base_link" type="mesh" contype="0" conaffinity="0" rgba="1 1 1 1" mesh="base_link_v2"/>
       <joint armature="0" damping="0" limited="false" name="root" pos="0 0 0" stiffness="0" type="free"/>
       <site name="imu_location" pos="0 0 0" euler="0 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
       <site name="imu_location_vectornav" pos="0 0 0" euler="-3.141592 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
