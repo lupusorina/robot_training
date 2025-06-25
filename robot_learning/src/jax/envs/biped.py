@@ -29,7 +29,7 @@ import time
 # Constants.
 NAME_ROBOT = 'biped'
 if NAME_ROBOT == 'biped':
-  import robot_learning.src.assets.biped.config as robot_config
+  import robot_learning.src.assets.biped_no_yaw.config as robot_config
 else:
   raise ValueError(f'NAME_ROBOT must be "biped"')
 print('NAME_ROBOT:', NAME_ROBOT)
@@ -159,14 +159,12 @@ class Biped(mjx_env.MjxEnv):
 
     # Mapping from joint names to the PPO action indices.
     self.actuated_joint_names_to_policy_idx_dict = {
-      "L_YAW": 0,
-      "L_HAA": 1,
-      "L_HFE": 2,
-      "L_KFE": 3,
-      "R_YAW": 4,
-      "R_HAA": 5,
-      "R_HFE": 6,
-      "R_KFE": 7,
+      "L_HAA": 0,
+      "L_HFE": 1,
+      "L_KFE": 2,
+      "R_HAA": 3,
+      "R_HFE": 4,
+      "R_KFE": 5,
     }
     for name in self.actuated_joint_names_to_policy_idx_dict:
       assert name in self.idx_actuators_dict, f"{name} is not in {self.idx_actuators_dict.keys()}"
