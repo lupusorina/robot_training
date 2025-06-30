@@ -37,8 +37,8 @@ CONFIG_RANDOMIZE = {
   },
   'randomize_body_ipos': {
     'enable': False,
-    'minval': -0.01,
-    'maxval': 0.01,
+    'minval': [-0.05, -0.02, -0.005],
+    'maxval': [0.05, 0.02, 0.005],
   },
   'randomize_actuator_gainprm':
   {
@@ -48,53 +48,63 @@ CONFIG_RANDOMIZE = {
   },
 }
 
-parser = argparse.ArgumentParser(description='Domain randomization configuration')
-parser.add_argument('--randomize_floor_friction', action='store_true',
-                    help='Randomize floor friction')
-parser.add_argument('--no_randomize_floor_friction', action='store_true',
-                    dest='randomize_floor_friction',
-                    help='Disable floor friction randomization')
-parser.add_argument('--randomize_link_masses', action='store_true',
-                    help='Randomize link masses')
-parser.add_argument('--randomize_torso_mass', action='store_true',
-                    help='Randomize torso mass')
-parser.add_argument('--randomize_qpos0', action='store_true',
-                    help='Randomize initial joint positions')
-parser.add_argument('--randomize_body_ipos', action='store_true',
-                    help='Randomize body center of mass offsets')
-parser.add_argument('--randomize_actuator_gainprm', action='store_true',
-                    help='Randomize actuator gain parameters')
-args = parser.parse_args()
+# Try to parse command line arguments, but handle Jupyter notebook environments gracefully
+try:
+    parser = argparse.ArgumentParser(description='Domain randomization configuration')
+    parser.add_argument('--randomize_floor_friction', action='store_true',
+                        help='Randomize floor friction')
+    parser.add_argument('--no_randomize_floor_friction', action='store_true',
+                        dest='randomize_floor_friction',
+                        help='Disable floor friction randomization')
+    parser.add_argument('--randomize_link_masses', action='store_true',
+                        help='Randomize link masses')
+    parser.add_argument('--randomize_torso_mass', action='store_true',
+                        help='Randomize torso mass')
+    parser.add_argument('--randomize_qpos0', action='store_true',
+                        help='Randomize initial joint positions')
+    parser.add_argument('--randomize_body_ipos', action='store_true',
+                        help='Randomize body center of mass offsets')
+    parser.add_argument('--randomize_actuator_gainprm', action='store_true',
+                        help='Randomize actuator gain parameters')
+    args = parser.parse_args()
 
-# Update CONFIG_RANDOMIZE with command line arguments.
-CONFIG_RANDOMIZE.update({
-    'randomize_floor_friction': {
-      'enable': args.randomize_floor_friction,
-      'minval': 0.4,
-      'maxval': 1.0,
-    },
-    'randomize_link_masses': {
-      'enable': args.randomize_link_masses,
-      'minval': 0.9,
-      'maxval': 1.1,
-    },
-    'randomize_torso_mass': {
-      'enable': args.randomize_torso_mass,
-      'minval': -0.5,
-      'maxval': 0.5,
-    },
-    'randomize_qpos0': {
-      'enable': args.randomize_qpos0,
-      'minval': -0.1,
-      'maxval': 0.1,
-    },
-    'randomize_actuator_gainprm': {
-      'enable': args.randomize_actuator_gainprm,
-      'minval': 0.9,
-      'maxval': 1.1,
-    },
-
-})
+    # Update CONFIG_RANDOMIZE with command line arguments.
+    CONFIG_RANDOMIZE.update({
+        'randomize_floor_friction': {
+          'enable': args.randomize_floor_friction,
+          'minval': 0.4,
+          'maxval': 1.0,
+        },
+        'randomize_link_masses': {
+          'enable': args.randomize_link_masses,
+          'minval': 0.9,
+          'maxval': 1.1,
+        },
+        'randomize_torso_mass': {
+          'enable': args.randomize_torso_mass,
+          'minval': -0.5,
+          'maxval': 0.5,
+        },
+        'randomize_qpos0': {
+          'enable': args.randomize_qpos0,
+          'minval': -0.1,
+          'maxval': 0.1,
+        },
+        'randomize_actuator_gainprm': {
+          'enable': args.randomize_actuator_gainprm,
+          'minval': 0.9,
+          'maxval': 1.1,
+        },
+        'randomize_body_ipos': {
+          'enable': args.randomize_body_ipos,
+          'minval': [-0.05, -0.02, -0.005],
+          'maxval': [0.05, 0.02, 0.005],
+        },
+    })
+except SystemExit:
+    # This happens when argparse fails (e.g., in Jupyter notebooks)
+    # Keep the default CONFIG_RANDOMIZE values
+    pass
 
 # Testing: load the latest weights and test the policy.
 RESULTS_FOLDER_PATH = os.path.abspath('results')
@@ -113,11 +123,6 @@ with open(config_path, 'w') as f:
 with open(config_path, 'r') as f:
     CONFIG_RANDOMIZE = json.load(f)
 
-folder_path = epath.Path(RESULTS_FOLDER_PATH) / latest_folder
-# Read in the actuator mapping.
-with open(os.path.join(folder_path, 'idx_actuators_dict.json'), 'r') as f:
-    IDX_ACTUATORS_DICT = json.load(f)
-    print(f'IDX_ACTUATORS_DICT: {IDX_ACTUATORS_DICT}')
 
 def domain_randomize(model: mjx.Model, rng: jax.Array):
     @jax.vmap
@@ -163,11 +168,15 @@ def domain_randomize(model: mjx.Model, rng: jax.Array):
         if CONFIG_RANDOMIZE['randomize_body_ipos']['enable']:
             # Center of mass offset.
             rng, key = jax.random.split(rng)
-            com_offset = jax.random.uniform(key, shape=(3,), minval=CONFIG_RANDOMIZE['randomize_body_ipos']['minval'], maxval=CONFIG_RANDOMIZE['randomize_body_ipos']['maxval'])
+            com_offset_x = jax.random.uniform(key, shape=(1,), minval=CONFIG_RANDOMIZE['randomize_body_ipos']['minval'][0], maxval=CONFIG_RANDOMIZE['randomize_body_ipos']['maxval'][0])
+            com_offset_y = jax.random.uniform(key, shape=(1,), minval=CONFIG_RANDOMIZE['randomize_body_ipos']['minval'][1], maxval=CONFIG_RANDOMIZE['randomize_body_ipos']['maxval'][1])
+            com_offset_z = jax.random.uniform(key, shape=(1,), minval=CONFIG_RANDOMIZE['randomize_body_ipos']['minval'][2], maxval=CONFIG_RANDOMIZE['randomize_body_ipos']['maxval'][2])
+            com_offset = jax.numpy.array([com_offset_x, com_offset_y, com_offset_z]).reshape(3)
             body_ipos = model.body_ipos
+
             body_ipos = body_ipos.at[TORSO_BODY_ID].set(
-                body_ipos[TORSO_BODY_ID] + com_offset
-            )
+                body_ipos[TORSO_BODY_ID] + com_offset)
+
             model_updates["body_ipos"] = body_ipos
 
         if CONFIG_RANDOMIZE['randomize_actuator_gainprm']['enable']:
