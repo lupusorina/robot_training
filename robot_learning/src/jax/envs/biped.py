@@ -815,6 +815,31 @@ class Biped(mjx_env.MjxEnv):
     """Number of sim steps per control step."""
     return int(round(self.ctrl_dt / self._sim_dt))
 
+  def create_mujoco_viz_model(self):
+    """Create a separate MuJoCo model for visualization purposes."""
+    viz_model = mujoco.MjModel.from_xml_path(self.xml_path)
+    viz_data = mujoco.MjData(viz_model)
+
+    # Set the same timestep as the JAX environment
+    viz_model.opt.timestep = self._sim_dt
+
+    return viz_model, viz_data
+
+  def update_mujoco_viz_from_jax_state(self, viz_model, viz_data, jax_state):
+    """Update MuJoCo visualization data with JAX simulation state."""
+    # Copy position and velocity data from JAX to MuJoCo
+    viz_data.qpos[:] = np.array(jax_state.data.qpos)
+    viz_data.qvel[:] = np.array(jax_state.data.qvel)
+
+    # Copy actuator forces if available
+    if hasattr(jax_state.data, 'actuator_force'):
+      viz_data.actuator_force[:] = np.array(jax_state.data.actuator_force)
+
+    # Forward kinematics to update all derived quantities
+    mujoco.mj_forward(viz_model, viz_data)
+
+    return viz_data
+
 def test_joystick_command() -> None:
   import mediapy as media
 
@@ -851,6 +876,9 @@ def test_joystick_command() -> None:
     }
     eval_env = Biped(config_overrides=config_overrides)
 
+    # Create a separate MuJoCo model for visualization
+    viz_model, viz_data = eval_env.create_mujoco_viz_model()
+
     jit_reset = jax.jit(eval_env.reset)
     print(f'JITing reset and step')
     jit_policy = jax.jit(policy_fn)
@@ -875,56 +903,61 @@ def test_joystick_command() -> None:
 
     N = 1400
 
-    for _ in range(N):
-      command = eval_env.sample_command(rng)
-      time_duration = time.time()
-      act_rng, rng = jax.random.split(rng)
-      ctrl, _ = jit_policy(state.obs, act_rng)
-      state = step_fn(state, ctrl)
-      if state.done:
-        break
-      state.info["command"] = command
-      rollout.append(state)
+    with mujoco.viewer.launch_passive(viz_model, viz_data) as viewer:
 
-      xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
-      xyz += np.array([0.0, 0.0, 0.0])
-      x_axis = state.data.xmat[eval_env._torso_body_id, 0]
-      yaw = -np.arctan2(x_axis[1], x_axis[0])
-      modify_scene_fns.append(
-          functools.partial(
-              draw_joystick_command,
-              cmd=state.info["command"],
-              xyz=xyz,
-              theta=yaw,
-              scl=np.linalg.norm(state.info["command"]),
-          )
+      for _ in range(N):
+        command = eval_env.sample_command(rng)
+        time_duration = time.time()
+        act_rng, rng = jax.random.split(rng)
+        ctrl, _ = jit_policy(state.obs, act_rng)
+        state = step_fn(state, ctrl)
+
+        state.info["command"] = command
+        rollout.append(state)
+
+        # Update MuJoCo visualization with current JAX state
+        viz_data = eval_env.update_mujoco_viz_from_jax_state(viz_model, viz_data, state)
+        viewer.sync()
+
+        xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
+        xyz += np.array([0.0, 0.0, 0.0])
+        x_axis = state.data.xmat[eval_env._torso_body_id, 0]
+        yaw = -np.arctan2(x_axis[1], x_axis[0])
+        modify_scene_fns.append(
+            functools.partial(
+                draw_joystick_command,
+                cmd=state.info["command"],
+                xyz=xyz,
+                theta=yaw,
+                scl=np.linalg.norm(state.info["command"]),
+            )
+        )
+        time_diff = time.time() - time_duration
+
+      render_every = 1
+      fps = 1.0 / eval_env.ctrl_dt / render_every
+      print(f"fps: {fps}")
+      traj = rollout[::render_every]
+      mod_fns = modify_scene_fns[::render_every]
+
+      scene_option = mujoco.MjvOption()
+      scene_option.geomgroup[2] = True
+      scene_option.geomgroup[3] = False
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+
+      frames = eval_env.render(
+          traj,
+          camera="track",
+          scene_option=scene_option,
+          width=640,
+          height=480,
+          modify_scene_fns=mod_fns,
       )
-      time_diff = time.time() - time_duration
 
-    render_every = 1
-    fps = 1.0 / eval_env.ctrl_dt / render_every
-    print(f"fps: {fps}")
-    traj = rollout[::render_every]
-    mod_fns = modify_scene_fns[::render_every]
-
-    scene_option = mujoco.MjvOption()
-    scene_option.geomgroup[2] = True
-    scene_option.geomgroup[3] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
-    scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
-
-    frames = eval_env.render(
-        traj,
-        camera="track",
-        scene_option=scene_option,
-        width=640,
-        height=480,
-        modify_scene_fns=mod_fns,
-    )
-
-    media.write_video(f'joystick_testing_{folder}_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
-    print('Video saved')
+      media.write_video(f'joystick_testing_{folder}_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
+      print('Video saved')
 
 def main():
   test_joystick_command()
