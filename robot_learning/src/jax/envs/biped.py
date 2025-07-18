@@ -73,8 +73,8 @@ def default_config() -> config_dict.ConfigDict:
       reward_config=config_dict.create(
           scales=config_dict.create(
               # Tracking related rewards.
-              tracking_lin_vel=1.0,
-              tracking_ang_vel=0.5,
+              tracking_lin_vel=2.0,
+              tracking_ang_vel=1.0,
               # Base related rewards.
               lin_vel_z=0.0,
               ang_vel_xy=-0.15,
@@ -138,6 +138,9 @@ class Biped(mjx_env.MjxEnv):
     self._mjx_model = mjx.put_model(self._mj_model)
     self._xml_path = xml_path
     
+    # Store some variables that are used in domain randomization.
+    self.body_ipos = self._mjx_model.body_ipos
+    
     # Initialize the action space.
     self.idx_actuators_dict = {}
     for i in range(0, self.mj_model.nu):
@@ -147,6 +150,14 @@ class Biped(mjx_env.MjxEnv):
     for i in range(0, self.mj_model.njnt):
         self.name_joints.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, i))
     print(f'  Name joints: {self.name_joints}')
+    # get the qpos index for the ankle joints
+    ANKLE_JOINT_NAMES = ['L_ANKLE', 'R_ANKLE']
+    print(self.mj_model.joint('L_HAA').qposadr)
+    self.L_ANKLE_q_pos_idx = self.mj_model.joint('L_ANKLE').qposadr[0]
+    self.R_ANKLE_q_pos_idx = self.mj_model.joint('R_ANKLE').qposadr[0]
+    self.L_ANKLE_qvel_idx = self.L_ANKLE_q_pos_idx - 1
+    self.R_ANKLE_qvel_idx = self.R_ANKLE_q_pos_idx - 1
+
 
     list_joint_names_to_ignore = ['root']
     self.joint_idx_to_ignore_dict = {}
@@ -175,6 +186,8 @@ class Biped(mjx_env.MjxEnv):
     print('self.joint_names_to_actuator_idx_dict: ', self.joint_names_to_actuator_idx_dict)
     self.policy_idx_to_mujoco_actuator_idx_dict = { self.actuated_joint_names_to_policy_idx_dict[name]: self.joint_names_to_actuator_idx_dict[name] 
                                  for name in self.actuated_joint_names_to_policy_idx_dict }
+    
+    print('self.policy_idx_to_mujoco_actuator_idx_dict: ', self.policy_idx_to_mujoco_actuator_idx_dict)
 
     # Initial configuration.
     dict_initial_qpos = {}
@@ -458,6 +471,8 @@ class Biped(mjx_env.MjxEnv):
     state.info["xfrc_applied"] = data.xfrc_applied
     state.info["qpos"] = data.qpos
     state.info["qvel"] = data.qvel
+    linvel_B = self._get_sensor_data(data, LOCAL_LINVEL_SENSOR)
+    state.info["linvel_B"] = linvel_B
 
     done = done.astype(reward.dtype)
     state = state.replace(data=data, obs=obs, reward=reward, done=done)
@@ -512,6 +527,9 @@ class Biped(mjx_env.MjxEnv):
         * self._config.noise_config.level
         * q_j_noise_scale_without_spring
     )
+    # At ankle, put the joint_angles_without_spring to 0
+    noisy_joint_angles = noisy_joint_angles.at[self.L_ANKLE_q_pos_idx].set(0.0)
+    noisy_joint_angles = noisy_joint_angles.at[self.R_ANKLE_q_pos_idx].set(0.0)
 
     joint_vel = data.qvel[6:]
     joint_vel_without_spring = jp.array([joint_vel[i] for i in range(len(joint_vel)) if i not in self.joint_idx_to_ignore_dict.values()])
@@ -522,6 +540,9 @@ class Biped(mjx_env.MjxEnv):
         * self._config.noise_config.level
         * self._config.noise_config.scales.joint_vel
     )
+    # At ankle, put the joint_vel_without_spring to 0
+    noisy_joint_vel = noisy_joint_vel.at[self.L_ANKLE_qvel_idx].set(0.0)
+    noisy_joint_vel = noisy_joint_vel.at[self.R_ANKLE_qvel_idx].set(0.0)
 
     cos = jp.cos(info["phase"])
     sin = jp.sin(info["phase"])
@@ -536,6 +557,7 @@ class Biped(mjx_env.MjxEnv):
         * self._config.noise_config.scales.linvel
     )
 
+    assert info["last_act"].shape == (6,)
     current_state = jp.hstack([
         noisy_linvel,  # 3
         noisy_gyro,  # 3
@@ -543,7 +565,7 @@ class Biped(mjx_env.MjxEnv):
         info["command"],  # 3
         noisy_joint_angles - self._default_q_joints_without_spring,  # 8
         noisy_joint_vel,  # 8
-        info["last_act"],  # 8
+        info["last_act"],  # 6
         phase,
     ])
 
