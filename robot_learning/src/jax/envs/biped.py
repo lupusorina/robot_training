@@ -4,8 +4,9 @@
   https://github.com/google-deepmind/mujoco_playground/
 """
 
-from typing import Any, Dict, Optional, Union
-
+from typing import Any, Dict, Optional, Union, Sequence
+import argparse
+from brax.training.agents.ppo import checkpoint as ppo_checkpoint
 import jax
 import jax.numpy as jp
 from ml_collections import config_dict
@@ -14,11 +15,15 @@ from mujoco import mjx
 from mujoco.mjx._src import math
 import numpy as np
 import mujoco.viewer
+from etils import epath
+
 
 # Local imports.
 import robot_learning.src.jax.utils as utils
-from robot_learning.src.jax.utils import geoms_colliding
+from robot_learning.src.jax.utils import geoms_colliding, draw_joystick_command
 import robot_learning.src.jax.mjx_env as mjx_env
+
+import functools
 
 import os
 import json
@@ -832,154 +837,152 @@ class Biped(mjx_env.MjxEnv):
     """Number of sim steps per control step."""
     return int(round(self.ctrl_dt / self._sim_dt))
 
+  def create_mujoco_viz_model(self):
+    """Create a separate MuJoCo model for visualization purposes."""
+    viz_model = mujoco.MjModel.from_xml_path(self.xml_path)
+    viz_data = mujoco.MjData(viz_model)
 
-from robot_learning.src.jax.utils import draw_joystick_command
-import functools
-import mediapy as media
+    # Set the same timestep as the JAX environment
+    viz_model.opt.timestep = self._sim_dt
 
-def test_jax_biped():
+    return viz_model, viz_data
 
-  eval_env = Biped()
-  jit_reset = jax.jit(eval_env.reset)
-  jit_step = jax.jit(eval_env.step)
-  print(f'JITing reset and step')
-  rng = jax.random.PRNGKey(1)
+  def update_mujoco_viz_from_jax_state(self, viz_model, viz_data, jax_state):
+    """Update MuJoCo visualization data with JAX simulation state."""
+    # Copy position and velocity data from JAX to MuJoCo
+    viz_data.qpos[:] = np.array(jax_state.data.qpos)
+    viz_data.qvel[:] = np.array(jax_state.data.qvel)
 
-  rollout = []
-  modify_scene_fns = []
+    # Copy actuator forces if available
+    if hasattr(jax_state.data, 'actuator_force'):
+      viz_data.actuator_force[:] = np.array(jax_state.data.actuator_force)
 
-  x_vel = 0.0  #@param {type: "number"}
-  y_vel = 0.0  #@param {type: "number"}
-  yaw_vel = 0.0  #@param {type: "number"}
-  command = jp.array([x_vel, y_vel, yaw_vel])
+    # Forward kinematics to update all derived quantities
+    mujoco.mj_forward(viz_model, viz_data)
 
-  phase_dt = 2 * jp.pi * eval_env.ctrl_dt * 1.5
-  phase = jp.array([0, jp.pi])
+    return viz_data
 
-  state = jit_reset(rng)
-  state.info["phase_dt"] = phase_dt
-  state.info["phase"] = phase
+def test_joystick_command() -> None:
+  import mediapy as media
 
-  # create a df to store the state.metrics data
-  metrics_list = []
-  ctrl_list = []
-  state_list = []
-  for i in range(1400):
-    print(i)
-    time_duration = time.time()
+  jax.config.update('jax_debug_nans', True)
 
-    ctrl = jp.zeros(eval_env.action_size)
-    state = jit_step(state, ctrl)
-    state_list.append(state.obs["state"])
-    metrics_list.append(state.metrics)
-    if state.done:
-      break
-    state.info["command"] = command
-    rollout.append(state)
+  # Load Policy.
+  RESULTS_FOLDER_PATH = os.path.abspath('../results')
+  folders = sorted(os.listdir(RESULTS_FOLDER_PATH))
+  numeric_folders = [f for f in folders if f[0].isdigit()]
+  latest_folder = numeric_folders[-1]
+  print(f'Latest folder with trained policy: {latest_folder}')
 
-    xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
-    xyz += np.array([0.0, 0.0, 0.0])
-    x_axis = state.data.xmat[eval_env._torso_body_id, 0]
-    yaw = -np.arctan2(x_axis[1], x_axis[0])
-    modify_scene_fns.append(
-        functools.partial(
-            draw_joystick_command,
-            cmd=state.info["command"],
-            xyz=xyz,
-            theta=yaw,
-            scl=np.linalg.norm(state.info["command"]),
+  # In the latest folder, find the latest folder, ignore the files.
+  folders = sorted(os.listdir(epath.Path(RESULTS_FOLDER_PATH) / latest_folder))
+  folders = [f for f in folders if os.path.isdir(epath.Path(RESULTS_FOLDER_PATH) / latest_folder / f)]
+  latest_weights_folder = folders[-1]
+  print(f'         latest weights folder: {latest_weights_folder}')
+
+  policy_fn_list = []
+  policy_folder_list = []
+
+  policy_fn = ppo_checkpoint.load_policy(epath.Path(RESULTS_FOLDER_PATH) / latest_folder / latest_weights_folder)
+  policy_fn_list.append(policy_fn)
+  policy_folder_list.append(latest_weights_folder)
+
+  for policy_fn, folder in zip(policy_fn_list, policy_folder_list):
+    print(f'{folder}')
+    config_overrides = {
+      "push_config": {
+        "enable": False,
+        "interval_range": [5.0, 10.0],
+        "magnitude_range": [0.05, 1.0],
+      },
+    }
+    eval_env = Biped(config_overrides=config_overrides)
+
+    # Create a separate MuJoCo model for visualization
+    viz_model, viz_data = eval_env.create_mujoco_viz_model()
+
+    jit_reset = jax.jit(eval_env.reset)
+    print(f'JITing reset and step')
+    jit_policy = jax.jit(policy_fn)
+    step_fn = jax.jit(eval_env.step)
+    # step_fn = eval_env.step
+    rng = jax.random.PRNGKey(1)
+
+    rollout = []
+    modify_scene_fns = []
+
+    x_vel = 0.0  #@param {type: "number"}
+    y_vel = 0.0  #@param {type: "number"}
+    yaw_vel = 0.0  #@param {type: "number"}
+    command = jp.array([x_vel, y_vel, yaw_vel])
+
+    phase_dt = 2 * jp.pi * eval_env.ctrl_dt * 1.5
+    phase = jp.array([0, jp.pi])
+
+    state = jit_reset(rng)
+    state.info["phase_dt"] = phase_dt
+    state.info["phase"] = phase
+
+    N = 1400
+
+    with mujoco.viewer.launch_passive(viz_model, viz_data) as viewer:
+
+      for _ in range(N):
+        command = eval_env.sample_command(rng)
+        time_duration = time.time()
+        act_rng, rng = jax.random.split(rng)
+        ctrl, _ = jit_policy(state.obs, act_rng)
+        state = step_fn(state, ctrl)
+
+        state.info["command"] = command
+        rollout.append(state)
+
+        # Update MuJoCo visualization with current JAX state
+        viz_data = eval_env.update_mujoco_viz_from_jax_state(viz_model, viz_data, state)
+        viewer.sync()
+
+        xyz = np.array(state.data.xpos[eval_env._mj_model.body("base_link").id])
+        xyz += np.array([0.0, 0.0, 0.0])
+        x_axis = state.data.xmat[eval_env._torso_body_id, 0]
+        yaw = -np.arctan2(x_axis[1], x_axis[0])
+        modify_scene_fns.append(
+            functools.partial(
+                draw_joystick_command,
+                cmd=state.info["command"],
+                xyz=xyz,
+                theta=yaw,
+                scl=np.linalg.norm(state.info["command"]),
+            )
         )
-    )
-    time_diff = time.time() - time_duration
+        time_diff = time.time() - time_duration
 
-  render_every = 1
-  fps = 1.0 / eval_env.ctrl_dt / render_every
-  print(f"fps: {fps}")
-  traj = rollout[::render_every]
-  mod_fns = modify_scene_fns[::render_every]
+      render_every = 1
+      fps = 1.0 / eval_env.ctrl_dt / render_every
+      print(f"fps: {fps}")
+      traj = rollout[::render_every]
+      mod_fns = modify_scene_fns[::render_every]
 
-  scene_option = mujoco.MjvOption()
-  scene_option.geomgroup[2] = True
-  scene_option.geomgroup[3] = False
-  scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
-  scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
-  scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
+      scene_option = mujoco.MjvOption()
+      scene_option.geomgroup[2] = True
+      scene_option.geomgroup[3] = False
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = False
+      scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
 
-  frames = eval_env.render(
-      traj,
-      camera="track",
-      scene_option=scene_option,
-      width=640,
-      height=480,
-      modify_scene_fns=mod_fns,
-  )
+      frames = eval_env.render(
+          traj,
+          camera="track",
+          scene_option=scene_option,
+          width=640,
+          height=480,
+          modify_scene_fns=mod_fns,
+      )
 
-  # media.show_video(frames, fps=fps, loop=False)
-  media.write_video(f'joystick_testing_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
-  print('Video saved')
+      media.write_video(f'joystick_testing_{folder}_xvel_{x_vel}_yvel_{y_vel}_yawvel_{yaw_vel}.mp4', frames, fps=fps)
+      print('Video saved')
 
-def test_mujoco_biped():
-  paused = False
-  def key_callback(keycode):
-    if chr(keycode) == ' ':
-      nonlocal paused
-      paused = not paused
+def main():
+  test_joystick_command()
 
-  def read_contact_states(model, data):
-    contact_states = {}
-    contact_states['R_FOOT'] = False
-    contact_states['L_FOOT'] = False
-
-    geom1_list = []
-    geom2_list = []
-    for i in range(data.ncon):
-        contact = data.contact[i]
-
-        name_geom1 = mujoco.mj_id2name(
-            model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1)
-        name_geom2 = mujoco.mj_id2name(
-            model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2)
-        geom1_list.append(name_geom1)
-        geom2_list.append(name_geom2)
-
-    if data.ncon != 0:
-        if 'L_FOOT' in geom2_list:
-            first_entry_idx = geom2_list.index('L_FOOT')
-            if geom1_list[first_entry_idx] == 'floor':
-                contact_states['L_FOOT'] = True
-
-        if 'R_FOOT' in geom2_list:
-            first_entry_idx = geom2_list.index('R_FOOT')
-            if geom1_list[first_entry_idx] == 'floor':
-                contact_states['R_FOOT'] = True
-    return contact_states
-
-  mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
-  mj_data = mujoco.MjData(mj_model)
-
-  default_q_joints = jp.array(mj_model.keyframe("home").qpos[7:])
-  mj_data.ctrl = default_q_joints.copy()
-  viewer = mujoco.viewer.launch_passive(mj_model, mj_data, key_callback=key_callback)
-
-  dh = 0.0005
-
-  while viewer.is_running():
-    mj_data.ctrl = default_q_joints.copy()
-
-    # Slowly move the height down.
-    mj_model.eq_data[0][2] -= dh
-
-    # Check for feet contact.
-    contact_states = read_contact_states(mj_model, mj_data)
-    if contact_states['L_FOOT'] or contact_states['R_FOOT']:
-      mj_model.eq_active0 = 0 # Let go of the robot.
-      mj_data.eq_active[0] = 0
-      dh = 0.0
-
-    if not paused:
-      mujoco.mj_step(mj_model, mj_data)
-      viewer.sync()
-
-if __name__ == "__main__":
-  test_jax_biped()
-  # test_mujoco_biped()
+if __name__ == '__main__':
+  main()
