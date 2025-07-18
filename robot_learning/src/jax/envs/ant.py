@@ -19,13 +19,14 @@ import robot_learning.src.jax.mjx_env as mjx_env
 
 NAME_ROBOT = 'ant'
 if NAME_ROBOT == 'ant':
-  import robot_learning.src.assets.ant.config as robot_config
+  import robot_learning.src.assets.ant_positions.config as robot_config
 else:
   raise ValueError(f'NAME_ROBOT must be "ant"')
 print('NAME_ROBOT:', NAME_ROBOT)
 
 XML_PATH = robot_config.XML_PATH
 ROOT_BODY = robot_config.ROOT_BODY
+GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
@@ -38,7 +39,7 @@ def default_config() -> config_dict.ConfigDict:
         contact_cost_weight=5e-4,
         healthy_reward=1.0,
         terminate_when_unhealthy=True,
-        healthy_z_range=(0.2, 1.0),
+        healthy_z_range=(0.1, 0.5),
         contact_force_range=(-1.0, 1.0),
         reset_noise_scale=0.1,
       ),
@@ -85,13 +86,7 @@ class Ant(mjx_env.MjxEnv):
     # Initialize the action space.
     self.nb_joints = self.mj_model.njnt - 1 # First joint is freejoint.
     print(f"Number of joints: {self.nb_joints}")
-    
-    # Control action names.
-    self.name_actuators = []
-    for i in range(0, self.mj_model.nu):  # skip root
-        self.name_actuators.append(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, i))
-    print("Name of actuators:", self.name_actuators)
-    
+
     # Initialize the initial state.
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
 
@@ -182,13 +177,14 @@ class Ant(mjx_env.MjxEnv):
     forward_reward = velocity[0]
 
     min_z, max_z = self._healthy_z_range
-    is_healthy = jp.where(state.data.qpos[2] < min_z, 0.0, 1.0)
-    is_healthy = jp.where(state.data.qpos[2] > max_z, 0.0, is_healthy)
+    is_healthy_height = jp.where(state.data.qpos[2] < min_z, 0.0, 1.0)
+    is_healthy_height = jp.where(state.data.qpos[2] > max_z, 0.0, is_healthy_height)
+    is_healthy = (1 - self._get_termination(data)) * is_healthy_height
     if self._terminate_when_unhealthy:
       healthy_reward = self._healthy_reward
     else:
       healthy_reward = self._healthy_reward * is_healthy
-    ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(action))
+    ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(data.xfrc_applied))
     contact_cost = 0.0
 
     # Get the observation.
@@ -214,6 +210,20 @@ class Ant(mjx_env.MjxEnv):
 
     state = state.replace(data=data, obs=obs, reward=reward, done=done, metrics=metrics)
     return state
+
+  def _get_sensor_data(self, data: mjx.Data, sensor_name: str) -> jax.Array:
+    """Gets sensor data given sensor name."""
+    sensor_id = self.mj_model.sensor(sensor_name).id
+    sensor_adr = self.mj_model.sensor_adr[sensor_id]
+    sensor_dim = self.mj_model.sensor_dim[sensor_id]
+    return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
+
+  def _get_termination(self, data: mjx.Data) -> jax.Array:
+    gravity = self._get_sensor_data(data, GRAVITY_SENSOR)
+    fall_termination = gravity[-1] < 0.0
+    return (
+        fall_termination | jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
+    )
 
   def _get_obs(self, data: mjx.Data) -> jax.Array:
     """Observe ant body position and velocities."""
@@ -262,7 +272,7 @@ import os
 if __name__ == "__main__":
 
   parent_dir = os.path.abspath(os.path.join(os.getcwd()))
-  xml_path = os.path.join(parent_dir, '../../assets/ant/xmls/ant.xml')
+  xml_path = os.path.join(parent_dir, '../../assets/ant_positions/xmls/ant.xml')
 
   eval_env = Ant(xml_path=xml_path)
   jit_reset = jax.jit(eval_env.reset)
