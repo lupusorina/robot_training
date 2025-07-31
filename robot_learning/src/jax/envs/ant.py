@@ -10,9 +10,13 @@ import jax
 from jax import numpy as jp
 import mujoco
 from ml_collections import config_dict
-
 from mujoco import mjx
 from mujoco.mjx._src import math
+
+import mediapy as media
+import numpy as np
+import os
+import shutil
 
 # Local imports.
 import robot_learning.src.jax.mjx_env as mjx_env
@@ -20,37 +24,37 @@ import robot_learning.src.jax.mjx_env as mjx_env
 NAME_ROBOT = 'ant'
 if NAME_ROBOT == 'ant':
   import robot_learning.src.assets.ant_positions.config as robot_config
+  print('NAME_ROBOT:', NAME_ROBOT)
 else:
   raise ValueError(f'NAME_ROBOT must be "ant"')
-print('NAME_ROBOT:', NAME_ROBOT)
 
 XML_PATH = robot_config.XML_PATH
 ROOT_BODY = robot_config.ROOT_BODY
+ACCELEROMETER_SENSOR = robot_config.ACCELEROMETER_SENSOR
+GYRO_SENSOR = robot_config.GYRO_SENSOR
 GRAVITY_SENSOR = robot_config.GRAVITY_SENSOR
 
 def default_config() -> config_dict.ConfigDict:
   return config_dict.create(
-      ctrl_dt=0.02,
+      ctrl_dt=0.01,
       sim_dt=0.001,
-      use_contact_forces=False,
-      exclude_current_positions_from_observation=True,
       reward_config=config_dict.create(
         ctrl_cost_weight=0.5,
         contact_cost_weight=5e-4,
         healthy_reward=1.0,
         terminate_when_unhealthy=True,
-        healthy_z_range=(0.1, 0.5),
+        healthy_z_range=(0.06, 0.6),
         contact_force_range=(-1.0, 1.0),
         reset_noise_scale=0.1,
       ),
   )
-
 
 class Ant(mjx_env.MjxEnv):
 
   def __init__(
       self,
       xml_path: str = XML_PATH,
+      save_config_folder: str = None,
       config: config_dict.ConfigDict = default_config(),
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
@@ -66,19 +70,19 @@ class Ant(mjx_env.MjxEnv):
     self._mj_model.opt.timestep = config.sim_dt
     self.ctrl_dt = config.ctrl_dt
     self._sim_dt = config.sim_dt
-
+    
     self._ctrl_cost_weight = config.reward_config.ctrl_cost_weight
-    self._use_contact_forces = config.use_contact_forces
+    # self._use_contact_forces = config.use_contact_forces
     self._contact_cost_weight = config.reward_config.contact_cost_weight
     self._healthy_reward = config.reward_config.healthy_reward
     self._terminate_when_unhealthy = config.reward_config.terminate_when_unhealthy
     self._healthy_z_range = config.reward_config.healthy_z_range
     self._contact_force_range = config.reward_config.contact_force_range
     self._reset_noise_scale = config.reward_config.reset_noise_scale
-    self._exclude_current_positions_from_observation = config.exclude_current_positions_from_observation
+    # self._exclude_current_positions_from_observation = config.exclude_current_positions_from_observation
 
-    if self._use_contact_forces:
-      raise NotImplementedError('use_contact_forces not implemented.')
+
+    self._reset_noise_scale = config.reward_config.reset_noise_scale
   
     # Create the mjx model.
     self._mjx_model = mjx.put_model(self._mj_model)
@@ -86,14 +90,22 @@ class Ant(mjx_env.MjxEnv):
     # Initialize the action space.
     self.nb_joints = self.mj_model.njnt - 1 # First joint is freejoint.
     print(f"Number of joints: {self.nb_joints}")
+    
+    if save_config_folder is not None:
+      # Copy over the biped_RL.xml file.
+      shutil.copy(XML_PATH, os.path.join(save_config_folder, 'ant.xml'))
+      path_to_env = '/home/sorina/robot_training/robot_learning/src/jax/envs/ant.py'
+      shutil.copy(path_to_env, os.path.join(save_config_folder, 'ant.py'))
 
     # Initialize the initial state.
     self._init_q = jp.array(self._mj_model.keyframe("home").qpos)
-
+    self._default_q_joints = jp.array(self._mj_model.keyframe("home").qpos[7:])
+    print(f'default_q_joints: {self._default_q_joints}')
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
     """Resets the environment to an initial state."""
     qpos = self._init_q
+    print(f'qpos: {qpos}')
     qvel = jp.zeros(self.mjx_model.nv)
     
     # x=+U(-0.5, 0.5), y=+U(-0.5, 0.5), yaw=U(-3.14, 3.14).
@@ -126,13 +138,13 @@ class Ant(mjx_env.MjxEnv):
     if qpos[7:] is not None:
       data = data.replace(ctrl=jp.zeros(self.mj_model.nu))
     data = mjx.forward(self.mjx_model, data)
-
+    
     # Initialize the observation.
     obs = self._get_obs(data)
 
     # Initialize the reward and done.
     reward, done = jp.zeros(2)
-    
+
     # Initialize the metrics.
     metrics = {
         'reward_forward': jp.array(0.0, dtype=jp.float32),
@@ -153,20 +165,21 @@ class Ant(mjx_env.MjxEnv):
         "qpos": data.qpos,
         "qvel": data.qvel,
         "xfrc_applied": data.xfrc_applied,
+        "previous_pos_x": jp.array(0.0),
     }
 
     return mjx_env.State(data, obs, reward, done, metrics, info)
 
-  def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
-    """Run one timestep of the environment's dynamics."""
-    
-    # Step the model.
+  def step(self, state: mjx_env.State, delta_action: jax.Array) -> mjx_env.State:
+
+    action = self._default_q_joints + delta_action
     data = mjx_env.step(
       self.mjx_model, state.data, action, self._n_substeps
     )
-    
+
+    # Update the info.
     state.info["last_last_action"] = state.info["last_action"]
-    state.info["last_action"] = action
+    state.info["last_action"] = delta_action
     state.info["qpos"] = data.qpos
     state.info["qvel"] = data.qvel
     state.info["xfrc_applied"] = data.xfrc_applied
@@ -175,16 +188,21 @@ class Ant(mjx_env.MjxEnv):
     velocity = (data.qpos[0:2] - state.data.qpos[0:2]) / self._sim_dt
     # jax.debug.print("velocity: {}", velocity)
     forward_reward = velocity[0]
+    # goal_x = 20.0
+    # goal_y = 0.0
+    # distance_to_goal = math.norm(data.qpos[0:2] - jp.array([goal_x, goal_y]))
+    # close_to_goal_reward = jp.where(distance_to_goal < 0.1, 10.0, 0.0)
 
     min_z, max_z = self._healthy_z_range
-    is_healthy_height = jp.where(state.data.qpos[2] < min_z, 0.0, 1.0)
-    is_healthy_height = jp.where(state.data.qpos[2] > max_z, 0.0, is_healthy_height)
-    is_healthy = (1 - self._get_termination(data)) * is_healthy_height
+    is_healthy = jp.where(state.data.qpos[2] < min_z, 0.0, 1.0)
+    is_healthy = jp.where(state.data.qpos[2] > max_z, 0.0, is_healthy)
     if self._terminate_when_unhealthy:
       healthy_reward = self._healthy_reward
     else:
       healthy_reward = self._healthy_reward * is_healthy
-    ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(data.xfrc_applied))
+    ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(state.info["last_last_action"] - state.info["last_action"]))
+    # ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(delta_action))
+    
     contact_cost = 0.0
 
     # Get the observation.
@@ -192,10 +210,11 @@ class Ant(mjx_env.MjxEnv):
 
     # Get the reward and done.
     reward = forward_reward + healthy_reward - ctrl_cost - contact_cost
+  
     done = 1.0 - is_healthy if self._terminate_when_unhealthy else 0.0
     done = done.astype(reward.dtype)
 
-    # Update the metrics with scalar values
+    # Update the metrics with scalar values.
     metrics = {
         'reward_forward': forward_reward,
         'reward_survive': healthy_reward,
@@ -210,6 +229,12 @@ class Ant(mjx_env.MjxEnv):
 
     state = state.replace(data=data, obs=obs, reward=reward, done=done, metrics=metrics)
     return state
+  
+  def get_reward(self, state: mjx_env.State, data: mjx.Data):
+    pos_x = data.qpos[0]
+    previous_pos_x = state.info["previous_pos_x"]
+    reward_forward = pos_x - previous_pos_x
+    return reward_forward
 
   def _get_sensor_data(self, data: mjx.Data, sensor_name: str) -> jax.Array:
     """Gets sensor data given sensor name."""
@@ -218,30 +243,71 @@ class Ant(mjx_env.MjxEnv):
     sensor_dim = self.mj_model.sensor_dim[sensor_id]
     return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
 
-  def _get_termination(self, data: mjx.Data) -> jax.Array:
-    gravity = self._get_sensor_data(data, GRAVITY_SENSOR)
-    fall_termination = gravity[-1] < 0.0
-    return (
-        fall_termination | jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
-    )
+  # def _get_termination(self, data: mjx.Data) -> jax.Array:
+  #   WORKSPACE_LENGTH = 10.0 # m
+  #   WORKSPACE_WIDTH = 10.0 # m
+
+  #   x_pos = data.qpos[0]
+  #   y_pos = data.qpos[1]
+
+  #   gravity = self._get_sensor_data(data, GRAVITY_SENSOR)
+  #   fall_termination = gravity[-1] < 0.0
+  #   return (
+  #       fall_termination | jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
+  #   )
+
+  #   # termination = (
+  #   #     jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any() |
+  #   #     (x_pos < -WORKSPACE_LENGTH / 2.0).astype(jp.bool_) | (x_pos > WORKSPACE_LENGTH / 2.0).astype(jp.bool_) |
+  #   #     (y_pos < -WORKSPACE_WIDTH / 2.0).astype(jp.bool_) | (y_pos > WORKSPACE_WIDTH / 2.0).astype(jp.bool_)
+  #   # )
+
+  #   # return termination
 
   def _get_obs(self, data: mjx.Data) -> jax.Array:
-    """Observe ant body position and velocities."""
     qpos = data.qpos.copy()
     qvel = data.qvel.copy()
+    
+    joint_angles = qpos[7:]
+    joint_velocities = qvel[6:]
+    orientation = qpos[3:7]
+    heading_vector = (math.quat_to_mat(orientation) @ jp.array([1, 0, 0]))[0:2]
+    heading_vector = heading_vector / jp.linalg.norm(heading_vector)
+    
+    imu_data = self._get_sensor_data(data, ACCELEROMETER_SENSOR)
+    accelerations = imu_data[:3]
+    angular_vel = self._get_sensor_data(data, GYRO_SENSOR)
 
-    if self._exclude_current_positions_from_observation:
-      qpos = data.qpos[2:]
-
-    state = jp.hstack([
-                qpos,
-                qvel
+    obs = jp.hstack([
+              joint_angles, # 8
+              joint_velocities, # 8
+              heading_vector, # 2
+              accelerations, # 3
+              angular_vel, # 3
             ])
 
     return {
-      "state": state,
-      "privileged_state": state,
+      "state": obs,
+      "privileged_state": obs,
     }
+
+  # def _get_obs(self, data: mjx.Data) -> jax.Array:
+  #   """Observe ant body position and velocities."""
+  #   qpos = data.qpos.copy()
+  #   qvel = data.qvel.copy()
+
+  #   # if self._exclude_current_positions_from_observation:
+  #   qpos = data.qpos[2:]
+
+  #   state = jp.hstack([
+  #               qpos,
+  #               qvel
+  #           ])
+
+  #   return {
+  #     "state": state,
+  #     "privileged_state": state,
+  #   }
 
    # Accessors.
   @property
@@ -264,10 +330,6 @@ class Ant(mjx_env.MjxEnv):
   def _n_substeps(self) -> int:
     """Number of sim steps per control step."""
     return int(round(self.ctrl_dt / self._sim_dt))
-
-import mediapy as media
-import numpy as np
-import os
 
 if __name__ == "__main__":
 
@@ -294,12 +356,17 @@ if __name__ == "__main__":
     time_duration = time.time()
 
     ctrl = jp.zeros(eval_env.action_size)
+    for i in range(8):
+      ctrl = ctrl.at[i].set(np.sin(time.time())*0.8)
+    print(f'ctrl: {ctrl}')
+    ctrl = jp.array(ctrl)
     state = jit_step(state, ctrl)
     state_list.append(state.obs["state"])
     metrics_list.append(state.metrics)
     if state.done:
       break
     rollout.append(state)
+    print(state.data.qpos)
 
     xyz = np.array(state.data.xpos[eval_env._mj_model.body("torso").id])
     xyz += np.array([0.0, 0.0, 0.0])
